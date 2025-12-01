@@ -10,6 +10,7 @@ import { AssetList } from './components/AssetList';
 import { AssetDetail } from './components/AssetDetail';
 import { PeopleList } from './components/People';
 import { ShoppingList } from './components/Shopping';
+import { CommentsInbox } from './components/CommentsInbox';
 import { GoogleIntegrationModal } from './components/GoogleIntegration';
 
 const App: React.FC = () => {
@@ -19,6 +20,7 @@ const App: React.FC = () => {
         <Layout>
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/inbox" element={<CommentsInbox />} />
             <Route path="/tasks" element={<TaskList />} />
             <Route path="/tasks/:taskId" element={<TaskDetail />} />
             <Route path="/assets" element={<AssetList />} />

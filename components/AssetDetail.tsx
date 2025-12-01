@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
@@ -119,6 +120,7 @@ export const AssetDetail = () => {
         };
         addTask(newTask);
         setShowServiceModal(false);
+        navigate(`/tasks/${newTask.id}`);
     };
     
     const saveUsage = () => {

@@ -6,7 +6,7 @@ import { useAppStore } from '../store/AppContext';
 import { TaskStatus, Urgency, Importance, Comment, Material, RecurrenceRule, ShoppingStatus, ShoppingItem, Attachment } from '../types';
 import { 
   ArrowLeft, Calendar, MapPin, Users, Truck, CheckSquare, 
-  MessageSquare, Send, Save, Trash2, ShoppingBag, AlertCircle, Edit2, Plus, X, Check, Repeat, Wand2, PackageCheck, Paperclip, Camera, FileText, Clock as ClockIcon, DollarSign
+  MessageSquare, Send, Save, Trash2, ShoppingBag, AlertCircle, Edit2, Plus, X, Check, Repeat, Wand2, PackageCheck, Paperclip, Camera, FileText, Clock as ClockIcon, DollarSign, User
 } from 'lucide-react';
 import { generateSubtasks, estimateMaterials } from '../services/gemini';
 
@@ -460,6 +460,9 @@ export const TaskDetail = () => {
   
   const [showAssigneeSelect, setShowAssigneeSelect] = useState(false);
 
+  // Mention State
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
   // AI States
   const [isSuggestingSubtasks, setIsSuggestingSubtasks] = useState(false);
   const [isSuggestingMaterials, setIsSuggestingMaterials] = useState(false);
@@ -510,6 +513,26 @@ export const TaskDetail = () => {
     if (!commentText.trim()) return;
     addComment(task.id, commentText);
     setCommentText('');
+    setMentionQuery(null);
+  };
+  
+  const handleCommentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setCommentText(val);
+        const lastWord = val.split(' ').pop();
+        if (lastWord && lastWord.startsWith('@') && lastWord.length > 1) {
+             setMentionQuery(lastWord.slice(1));
+        } else {
+             setMentionQuery(null);
+        }
+  };
+
+  const insertMention = (name: string) => {
+      const words = commentText.split(' ');
+      words.pop(); // remove partial
+      words.push(`@${name}`);
+      setCommentText(words.join(' ') + ' ');
+      setMentionQuery(null);
   };
 
   const saveDescription = () => {
@@ -655,6 +678,8 @@ export const TaskDetail = () => {
   };
 
   const getEnumKeys = (e: any) => Object.keys(e).filter(k => !isNaN(Number(k)));
+
+  const filteredMentions = mentionQuery ? people.filter(p => p.firstName.toLowerCase().startsWith(mentionQuery.toLowerCase())) : [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -860,15 +885,33 @@ export const TaskDetail = () => {
                  ))}
                  {task.comments.length === 0 && <p className="text-sm text-slate-500">No comments yet. Mention someone with @Name.</p>}
              </div>
-             <form onSubmit={handlePostComment} className="flex gap-2">
+             <form onSubmit={handlePostComment} className="flex gap-2 relative">
+                 {mentionQuery !== null && filteredMentions.length > 0 && (
+                    <div className="absolute bottom-full left-0 mb-2 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-20">
+                        <div className="p-2 text-xs font-bold text-slate-500 bg-slate-900/50 uppercase tracking-wider">Suggested People</div>
+                        {filteredMentions.map(p => (
+                            <button 
+                                key={p.id}
+                                type="button"
+                                onClick={() => insertMention(p.firstName)}
+                                className="w-full text-left px-4 py-2 hover:bg-indigo-600/20 hover:text-indigo-200 text-sm text-slate-200 flex items-center transition-colors border-b border-slate-800 last:border-0"
+                            >
+                                <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold mr-2 text-white shadow-sm">
+                                    {p.firstName.charAt(0)}
+                                </div>
+                                {p.firstName} {p.lastName}
+                            </button>
+                        ))}
+                    </div>
+                 )}
                  <input 
                     type="text" 
                     value={commentText}
-                    onChange={e => setCommentText(e.target.value)}
-                    placeholder="Add a comment... (@Name to mention)"
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    onChange={handleCommentChange}
+                    placeholder="Add a comment... (Type @ to mention)"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500 transition-colors"
                  />
-                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-lg">
+                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-lg transition-colors">
                      <Send size={20} />
                  </button>
              </form>

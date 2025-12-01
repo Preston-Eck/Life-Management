@@ -1,19 +1,24 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink, Cloud } from 'lucide-react';
+import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink, Cloud, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/AppContext';
 import { GoogleIntegrationModal } from './GoogleIntegration';
 
-const NavItem = ({ to, icon: Icon, label, active }: any) => (
+const NavItem = ({ to, icon: Icon, label, active, badge }: any) => (
   <Link
     to={to}
-    className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+    className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors relative ${
       active ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
     }`}
   >
     <Icon size={20} />
     <span className="font-medium">{label}</span>
+    {badge > 0 && (
+      <span className="absolute right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+        {badge}
+      </span>
+    )}
   </Link>
 );
 
@@ -24,7 +29,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [notifOpen, setNotifOpen] = useState(false);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'All' | 'Mentions'>('All');
-  const { notifications, markNotificationRead, clearNotifications, snoozeNotification, pinNotification } = useAppStore();
+  const { notifications, markNotificationRead, clearNotifications, snoozeNotification, pinNotification, tasks } = useAppStore();
 
   const visibleNotifications = notifications
     .filter(n => !n.snoozedUntil || new Date(n.snoozedUntil) < new Date())
@@ -35,6 +40,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     : visibleNotifications.filter(n => n.type === 'Mention');
 
   const unreadCount = visibleNotifications.filter(n => !n.isRead).length;
+
+  // Calculate unread comments count for Inbox badge
+  const unreadCommentsCount = tasks.reduce((acc, task) => {
+    return acc + task.comments.filter(c => !c.isRead).length;
+  }, 0);
 
   const handleSnooze = (id: string) => {
     // Snooze for 1 hour
@@ -54,6 +64,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
             <NavItem to="/" icon={Home} label="Dashboard" active={location.pathname === '/'} />
+            <NavItem to="/inbox" icon={MessageSquare} label="Inbox" active={location.pathname.startsWith('/inbox')} badge={unreadCommentsCount} />
             <NavItem to="/tasks" icon={CheckSquare} label="Tasks" active={location.pathname.startsWith('/tasks')} />
             <NavItem to="/people" icon={Users} label="People & Family" active={location.pathname.startsWith('/people')} />
             <NavItem to="/assets" icon={Truck} label="Assets" active={location.pathname.startsWith('/assets')} />

@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../store/AppContext';
 import { Task, TaskStatus, Urgency, Importance, RecurrenceRule, Attachment, Person } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight, Circle, CheckCircle, AlertCircle, Plus, Wand2, X, Clock, Repeat, Paperclip, Camera, Image, Truck, MapPin, Users, Calendar, LayoutList, Columns } from 'lucide-react';
+import { ChevronRight, Circle, CheckCircle, AlertCircle, Plus, Wand2, X, Clock, Repeat, Paperclip, Camera, Image, Truck, MapPin, Users, Calendar, LayoutList, Columns, Filter, ArrowUpDown, Search, SlidersHorizontal } from 'lucide-react';
 import { generateSubtasks, estimateMaterials, analyzeTaskAttributes } from '../services/gemini';
 
 // --- Create Task Modal ---
@@ -473,16 +473,22 @@ const TaskItem: React.FC<{ task: Task; depth?: number; hideChildren?: boolean }>
 type ViewMode = 'List' | 'DueDate' | 'Context' | 'Status' | 'Location';
 
 export const TaskList = () => {
-  const { tasks, addTask, currentUser } = useAppStore();
+  const { tasks, addTask, currentUser, people } = useAppStore();
   const [viewMode, setViewMode] = useState<ViewMode>('List');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Filter out subtasks for the List view, but keep them for others or flatten them?
-  // Usually for grouping views, it's better to show all tasks flattened, or just top level.
-  // Let's flatten for grouping views to ensure nothing is missed in a category.
-  const flatTasks = tasks;
-  const rootTasks = tasks.filter(t => !t.parentId);
+  // --- Filtration State ---
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [filterContext, setFilterContext] = useState<string>('All');
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterPriority, setFilterPriority] = useState<string>('All'); // 'High', 'Urgent', 'Normal'
+  const [filterAssignee, setFilterAssignee] = useState<string>('All');
+
+  // --- Sorting State ---
+  const [sortField, setSortField] = useState<'DueDate' | 'Title' | 'Importance' | 'Created'>('DueDate');
+  const [sortDirection, setSortDirection] = useState<'Asc' | 'Desc'>('Asc');
 
   const handleSaveNewTask = (taskData: Partial<Task>) => {
       const newTask: Task = {
@@ -511,9 +517,89 @@ export const TaskList = () => {
       navigate(`/tasks/${newTask.id}`);
   };
 
-  // --- Grouping Logic ---
+  // --- Filter Logic ---
+  const filteredTasks = useMemo(() => {
+      return tasks.filter(t => {
+          // 1. Search
+          if (searchText) {
+              const term = searchText.toLowerCase();
+              const matchTitle = t.title.toLowerCase().includes(term);
+              const matchDesc = t.description.toLowerCase().includes(term);
+              if (!matchTitle && !matchDesc) return false;
+          }
+
+          // 2. Context
+          if (filterContext !== 'All' && t.context !== filterContext) return false;
+
+          // 3. Status
+          if (filterStatus !== 'All') {
+              if (filterStatus === 'Active' && t.status === TaskStatus.Completed) return false;
+              if (filterStatus === 'Completed' && t.status !== TaskStatus.Completed) return false;
+              if (filterStatus !== 'Active' && filterStatus !== 'Completed' && t.status !== filterStatus) return false;
+          }
+
+          // 4. Priority
+          if (filterPriority !== 'All') {
+              if (filterPriority === 'Urgent' && t.urgency !== Urgency.Urgent) return false;
+              if (filterPriority === 'High Importance' && t.importance !== Importance.VeryImportant && t.importance !== Importance.High) return false;
+          }
+
+          // 5. Assignee
+          if (filterAssignee !== 'All') {
+              if (!t.assigneeIds.includes(filterAssignee)) return false;
+          }
+
+          return true;
+      });
+  }, [tasks, searchText, filterContext, filterStatus, filterPriority, filterAssignee]);
+
+  // --- Sort Logic (Applied to Lists) ---
+  const sortedTasks = useMemo(() => {
+      const list = [...filteredTasks];
+      list.sort((a, b) => {
+          let valA: any = '';
+          let valB: any = '';
+
+          switch (sortField) {
+              case 'Title':
+                  valA = a.title;
+                  valB = b.title;
+                  break;
+              case 'DueDate':
+                  // Handle missing dates -> put them last usually
+                  valA = a.dueDate ? new Date(a.dueDate).getTime() : 9999999999999;
+                  valB = b.dueDate ? new Date(b.dueDate).getTime() : 9999999999999;
+                  break;
+              case 'Importance':
+                  valA = a.importance + a.urgency; // Score
+                  valB = b.importance + b.urgency;
+                  break;
+              default: 
+                  valA = 0; valB = 0; 
+          }
+
+          if (valA < valB) return sortDirection === 'Asc' ? -1 : 1;
+          if (valA > valB) return sortDirection === 'Asc' ? 1 : -1;
+          return 0;
+      });
+      return list;
+  }, [filteredTasks, sortField, sortDirection]);
+
+  // Root tasks for List view (filtering applied, but only showing roots unless searching)
+  // If searching, we often want to show subtasks too, but let's stick to root visualization for hierarchy, 
+  // OR show flat list if filtered.
+  const displayTasks = useMemo(() => {
+      // If we are filtering significantly, hierarchy might hide matches. 
+      // Strategy: If Text Search is active, show flat list. Else show hierarchy.
+      if (searchText) return sortedTasks;
+      return sortedTasks.filter(t => !t.parentId); 
+  }, [sortedTasks, searchText]);
+
+
+  // --- Grouping Logic (Uses Filtered Tasks) ---
   const groupedTasks = useMemo((): Record<string, Task[]> => {
       const groups: Record<string, Task[]> = {};
+      const sourceList = sortedTasks; // Use filtered AND sorted tasks
 
       if (viewMode === 'DueDate') {
           const now = new Date();
@@ -521,8 +607,8 @@ export const TaskList = () => {
           const nextWeek = new Date(today);
           nextWeek.setDate(today.getDate() + 7);
 
-          flatTasks.forEach(t => {
-              if (t.status === TaskStatus.Completed) return; // Optional: hide completed in date view? Let's keep them if wanted, or filter out.
+          sourceList.forEach(t => {
+              if (t.status === TaskStatus.Completed && filterStatus !== 'Completed') return; 
               
               let key = 'No Date';
               if (t.dueDate) {
@@ -547,7 +633,7 @@ export const TaskList = () => {
       }
 
       if (viewMode === 'Context') {
-          flatTasks.forEach(t => {
+          sourceList.forEach(t => {
               const key = t.context || 'Unassigned';
               if (!groups[key]) groups[key] = [];
               groups[key].push(t);
@@ -556,7 +642,7 @@ export const TaskList = () => {
       }
 
       if (viewMode === 'Status') {
-           flatTasks.forEach(t => {
+           sourceList.forEach(t => {
               const key = t.status;
               if (!groups[key]) groups[key] = [];
               groups[key].push(t);
@@ -565,7 +651,7 @@ export const TaskList = () => {
       }
 
       if (viewMode === 'Location') {
-           flatTasks.forEach(t => {
+           sourceList.forEach(t => {
               const key = t.location || 'Unassigned';
               if (!groups[key]) groups[key] = [];
               groups[key].push(t);
@@ -574,30 +660,105 @@ export const TaskList = () => {
       }
 
       return {};
-  }, [viewMode, flatTasks]);
+  }, [viewMode, sortedTasks, filterStatus]);
 
   const renderViewSwitcher = () => (
-      <div className="flex space-x-1 overflow-x-auto pb-2 border-b border-slate-800 mb-4 no-scrollbar">
-          {[
-              { id: 'List', icon: LayoutList, label: 'List' },
-              { id: 'DueDate', icon: Calendar, label: 'Due Date' },
-              { id: 'Context', icon: Columns, label: 'Context' },
-              { id: 'Status', icon: CheckCircle, label: 'Status' },
-              { id: 'Location', icon: MapPin, label: 'Location' },
-          ].map(view => (
-              <button
-                key={view.id}
-                onClick={() => setViewMode(view.id as ViewMode)}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                    viewMode === view.id 
-                    ? 'bg-indigo-600 text-white' 
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                  <view.icon size={16} />
-                  <span>{view.label}</span>
-              </button>
-          ))}
+      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-800 mb-4 pb-2 gap-4">
+          <div className="flex space-x-1 overflow-x-auto no-scrollbar">
+              {[
+                  { id: 'List', icon: LayoutList, label: 'List' },
+                  { id: 'DueDate', icon: Calendar, label: 'Due Date' },
+                  { id: 'Context', icon: Columns, label: 'Context' },
+                  { id: 'Status', icon: CheckCircle, label: 'Status' },
+                  { id: 'Location', icon: MapPin, label: 'Location' },
+              ].map(view => (
+                  <button
+                    key={view.id}
+                    onClick={() => setViewMode(view.id as ViewMode)}
+                    className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                        viewMode === view.id 
+                        ? 'bg-indigo-600 text-white' 
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                      <view.icon size={16} />
+                      <span className="hidden sm:inline">{view.label}</span>
+                  </button>
+              ))}
+          </div>
+
+          <div className="flex items-center space-x-2">
+               <div className="relative">
+                    <Search size={16} className="absolute left-3 top-2.5 text-slate-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Search tasks..." 
+                        value={searchText}
+                        onChange={e => setSearchText(e.target.value)}
+                        className="bg-slate-900 border border-slate-800 rounded-lg py-1.5 pl-9 pr-3 text-sm text-white focus:outline-none focus:border-indigo-500 w-40 md:w-56"
+                    />
+               </div>
+               <button 
+                  onClick={() => setShowFilters(!showFilters)} 
+                  className={`p-2 rounded-lg border transition-colors ${showFilters ? 'bg-slate-800 text-indigo-400 border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'}`}
+                  title="Filter & Sort"
+               >
+                   <SlidersHorizontal size={18} />
+               </button>
+          </div>
+      </div>
+  );
+
+  const renderFilterPanel = () => (
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 animate-fadeIn">
+          <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Context</label>
+              <select className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-white text-sm" value={filterContext} onChange={e => setFilterContext(e.target.value)}>
+                  <option value="All">All Contexts</option>
+                  <option value="Work">Work</option>
+                  <option value="Personal">Personal</option>
+                  <option value="Family">Family</option>
+                  <option value="School">School</option>
+              </select>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
+              <select className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-white text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                  <option value="All">All Statuses</option>
+                  <option value="Active">Active (Not Completed)</option>
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+              </select>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Priority</label>
+              <select className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-white text-sm" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+                  <option value="All">Any Priority</option>
+                  <option value="Urgent">Urgent Only</option>
+                  <option value="High Importance">High Importance</option>
+              </select>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Assignee</label>
+              <select className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-white text-sm" value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)}>
+                  <option value="All">Anyone</option>
+                  {people.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+              </select>
+          </div>
+          <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Sort By</label>
+              <div className="flex gap-2">
+                  <select className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-white text-sm" value={sortField} onChange={e => setSortField(e.target.value as any)}>
+                      <option value="DueDate">Due Date</option>
+                      <option value="Importance">Priority Score</option>
+                      <option value="Title">Title</option>
+                  </select>
+                  <button onClick={() => setSortDirection(prev => prev === 'Asc' ? 'Desc' : 'Asc')} className="bg-slate-800 border border-slate-700 rounded px-2 text-slate-400 hover:text-white">
+                      <ArrowUpDown size={16} className={sortDirection === 'Desc' ? 'transform rotate-180' : ''} />
+                  </button>
+              </div>
+          </div>
       </div>
   );
 
@@ -610,24 +771,27 @@ export const TaskList = () => {
         </div>
         <button 
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition shadow-lg shadow-indigo-900/20"
         >
           <Plus size={20} />
-          <span>New Task</span>
+          <span className="hidden sm:inline">New Task</span>
         </button>
       </div>
 
-      {renderViewSwitcher()}
+      <div className="flex flex-col">
+          {renderViewSwitcher()}
+          {showFilters && renderFilterPanel()}
+      </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden px-6 min-h-[400px]">
         {viewMode === 'List' ? (
-             rootTasks.length > 0 ? (
-                rootTasks.map(task => (
+             displayTasks.length > 0 ? (
+                displayTasks.map(task => (
                    <TaskItem key={task.id} task={task} />
                 ))
              ) : (
                 <div className="p-12 text-center text-slate-500">
-                    <p>No tasks found. Create one to get started!</p>
+                    <p>{searchText || filterContext !== 'All' ? 'No tasks match your filters.' : 'No tasks found. Create one to get started!'}</p>
                 </div>
              )
         ) : (
