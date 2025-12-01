@@ -1,0 +1,8 @@
+{
+  "name": "LifeOS",
+  "description": "A comprehensive work, life, and family management operating system integrated with AI for task breakdown, asset tracking, and relationship mapping.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
