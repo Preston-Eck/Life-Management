@@ -35,6 +35,35 @@ export enum ShoppingStatus {
   Acquired = 'Acquired',
 }
 
+export interface GoogleAccount {
+  id: string;
+  email: string;
+  avatarUrl?: string;
+  services: ('Gmail' | 'Calendar' | 'Drive')[];
+  lastSync?: string;
+}
+
+export interface TaskSuggestion {
+  id: string;
+  source: 'Gmail' | 'Calendar';
+  sourceAccount: string; // email
+  title: string;
+  description: string;
+  dueDate?: string;
+  confidence: number; // 0-1
+}
+
+export interface RecurrenceRule {
+  type: 'Time' | 'Usage';
+  // Time based
+  interval?: number; // e.g., every 3
+  unit?: 'day' | 'week' | 'month' | 'year';
+  // Usage based
+  assetId?: string;
+  usageThreshold?: number; // e.g., every 5000 miles
+  lastUsageReading?: number; // usage at last completion
+}
+
 export interface Comment {
   id: string;
   authorId: string; // Person ID
@@ -95,6 +124,8 @@ export interface Task {
   comments: Comment[];
   context: 'Work' | 'Personal' | 'Family' | 'School' | 'Other';
   costCache?: number; // Calculated total cost
+  recurrence?: RecurrenceRule;
+  googleEventId?: string;
 }
 
 export interface Asset {
@@ -109,6 +140,8 @@ export interface Asset {
   purchaseDate?: string;
   serviceHistoryTaskIds: string[];
   photoUrl?: string;
+  currentUsage?: number; // Odometer / Hours
+  usageUnit?: string; // "Miles", "Hours", "Cycles"
 }
 
 export interface Vendor {
@@ -145,18 +178,71 @@ export interface ReceiptParsedItem {
   totalPrice: number;
 }
 
+export type DataShareField = 
+  | 'Emails' 
+  | 'Phones' 
+  | 'Address' 
+  | 'PersonalDates' 
+  | 'CustomFields' 
+  | 'Notes' 
+  | 'Relationships';
+
+export interface SharePermission {
+  userId: string; // The app user account ID/Email being shared with
+  fields: DataShareField[];
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  type: string; // Changed from union to string to support Custom Types
+  address?: string;
+  website?: string;
+}
+
+export interface Affiliation {
+  organizationId: string;
+  role: string; // e.g. "Student", "Teacher", "Manager"
+}
+
+export interface ContactMethod {
+  id: string;
+  label: string; // "Mobile", "Work", "Home"
+  value: string;
+}
+
+export interface ImportantDate {
+  id: string;
+  label: string; // "Wedding Anniversary", "Graduation"
+  date: string; // YYYY-MM-DD
+  type: 'Birthday' | 'Anniversary' | 'Other';
+  repeats: boolean;
+}
+
 export interface Person {
   id: string;
+  isCurrentUser?: boolean; // Flag for "My Profile"
+  linkedUserAccount?: string; // Username/Email of the associated App Account
   firstName: string;
   lastName: string;
-  email?: string;
-  phone?: string;
   avatarUrl?: string;
-  birthdate?: string;
+  
+  // Robust Contact Info
+  emails: ContactMethod[];
+  phones: ContactMethod[];
+  address?: string;
+  
+  // Personal Data
+  birthDate?: string;
+  importantDates: ImportantDate[];
+  customFields: Record<string, string>; // key (field definition) -> value
+  
   relationships: {
     personId: string;
-    type: 'Parent' | 'Child' | 'Spouse' | 'Sibling' | 'Colleague' | 'Friend';
+    type: string;
   }[];
+  affiliations: Affiliation[];
   groups: string[];
   notes: Comment[];
+  sharedWith: SharePermission[]; // List of users this profile is shared with
 }

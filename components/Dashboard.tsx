@@ -4,7 +4,7 @@ import { useAppStore } from '../store/AppContext';
 import { TaskStatus, Urgency } from '../types';
 import { AlertTriangle, CheckCircle, ShoppingCart, Activity, Settings, BookOpen, Camera } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { parseReceiptImage } from '../services/gemini';
+import { parseReceipt } from '../services/gemini';
 
 const StatCard = ({ title, value, icon: Icon, colorClass, to }: any) => (
   <Link to={to} className="bg-slate-900 p-6 rounded-xl border border-slate-800 hover:border-slate-700 transition-all shadow-lg hover:shadow-xl cursor-pointer block">
@@ -41,7 +41,7 @@ export const Dashboard = () => {
   const handleReceiptScan = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
+    input.accept = 'image/*,application/pdf';
     input.onchange = async (e: any) => {
       const file = e.target.files[0];
       if (file) {
@@ -50,7 +50,7 @@ export const Dashboard = () => {
         reader.onloadend = async () => {
           const base64 = reader.result?.toString().split(',')[1];
           if (base64) {
-            const result = await parseReceiptImage(base64);
+            const result = await parseReceipt(base64, file.type);
             if (result.items.length > 0) {
               processReceiptItems(result.items);
               alert(`Processed receipt from ${result.vendor || 'Unknown Vendor'}. Updated shopping list.`);

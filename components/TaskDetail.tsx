@@ -1,10 +1,11 @@
+
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
-import { TaskStatus, Urgency, Importance, Comment, Material } from '../types';
+import { TaskStatus, Urgency, Importance, Comment, Material, RecurrenceRule } from '../types';
 import { 
   ArrowLeft, Calendar, MapPin, Users, Truck, CheckSquare, 
-  MessageSquare, Send, Save, Trash2, ShoppingBag, AlertCircle, Edit2, Plus, X, Check
+  MessageSquare, Send, Save, Trash2, ShoppingBag, AlertCircle, Edit2, Plus, X, Check, Repeat
 } from 'lucide-react';
 
 // --- Subtask Modal ---
@@ -75,6 +76,87 @@ const MaterialModal = ({ onClose, onSave, initialMaterial }: { onClose: () => vo
     );
 };
 
+// --- Recurrence Modal ---
+const RecurrenceModal = ({ task, onClose, onSave }: { task: any, onClose: () => void, onSave: (r: RecurrenceRule | undefined) => void }) => {
+    const [isEnabled, setIsEnabled] = useState(!!task.recurrence);
+    const [type, setType] = useState<'Time' | 'Usage'>(task.recurrence?.type || 'Time');
+    const [interval, setInterval] = useState(task.recurrence?.interval || 1);
+    const [unit, setUnit] = useState(task.recurrence?.unit || 'week');
+    const [usageThreshold, setUsageThreshold] = useState(task.recurrence?.usageThreshold || 5000);
+
+    const handleSubmit = () => {
+        if (!isEnabled) {
+            onSave(undefined);
+            onClose();
+            return;
+        }
+
+        const rule: RecurrenceRule = { type };
+        if (type === 'Time') {
+            rule.interval = interval;
+            rule.unit = unit;
+        } else {
+            rule.assetId = task.assetId;
+            rule.usageThreshold = usageThreshold;
+            rule.lastUsageReading = 0; // Will be set by logic later or current
+        }
+        onSave(rule);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-96 shadow-2xl">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-white">Repeat Task</h3>
+                    <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-white"/></button>
+                </div>
+                
+                <div className="space-y-4">
+                     <label className="flex items-center space-x-2 text-white">
+                        <input type="checkbox" checked={isEnabled} onChange={e => setIsEnabled(e.target.checked)} className="rounded bg-slate-800 border-slate-700" />
+                        <span>Enable Recurrence</span>
+                    </label>
+
+                    {isEnabled && (
+                        <>
+                            <div className="flex space-x-2 bg-slate-800 p-1 rounded">
+                                <button onClick={() => setType('Time')} className={`flex-1 py-1 rounded text-sm font-bold ${type === 'Time' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Time Based</button>
+                                <button onClick={() => setType('Usage')} className={`flex-1 py-1 rounded text-sm font-bold ${type === 'Usage' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`} disabled={!task.assetId}>Asset Usage</button>
+                            </div>
+
+                            {type === 'Time' ? (
+                                <div className="flex space-x-2">
+                                    <div className="flex items-center space-x-2">
+                                        <span className="text-sm text-slate-400">Every</span>
+                                        <input type="number" min="1" className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-white" value={interval} onChange={e => setInterval(Number(e.target.value))} />
+                                    </div>
+                                    <select className="flex-1 bg-slate-800 border border-slate-700 rounded p-1 text-white" value={unit} onChange={e => setUnit(e.target.value as any)}>
+                                        <option value="day">Day(s)</option>
+                                        <option value="week">Week(s)</option>
+                                        <option value="month">Month(s)</option>
+                                        <option value="year">Year(s)</option>
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <p className="text-xs text-slate-500 mb-2">Repeat every time asset is used:</p>
+                                    <div className="flex items-center space-x-2">
+                                        <input type="number" className="flex-1 bg-slate-800 border border-slate-700 rounded p-2 text-white" value={usageThreshold} onChange={e => setUsageThreshold(Number(e.target.value))} />
+                                        <span className="text-sm text-slate-400">Units (Miles/Hrs)</span>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    <button onClick={handleSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Comment Component ---
 
 interface CommentItemProps {
@@ -106,7 +188,6 @@ const CommentItem: React.FC<CommentItemProps> = ({
         }
     };
 
-    // Render text with highlight for mentions
     const renderText = (txt: string) => {
         const parts = txt.split(/(@\w+)/g);
         return parts.map((part, i) => 
@@ -164,7 +245,7 @@ export const TaskDetail = () => {
   const { taskId } = useParams();
   const navigate = useNavigate();
   const { 
-      tasks, updateTask, deleteTask, people, assets, currentUser, 
+      tasks, updateTask, deleteTask, completeTask, people, assets, currentUser, 
       addComment, editComment, deleteComment, addSubtask, updateTaskMaterials 
   } = useAppStore();
   
@@ -176,6 +257,7 @@ export const TaskDetail = () => {
   const [descText, setDescText] = useState('');
   const [showSubtaskModal, setShowSubtaskModal] = useState(false);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showRecurrenceModal, setShowRecurrenceModal] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
 
   if (!task) return <div className="p-8 text-white">Task not found</div>;
@@ -185,7 +267,12 @@ export const TaskDetail = () => {
 
   // Handlers
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateTask({ ...task, status: e.target.value as TaskStatus });
+    const newStatus = e.target.value as TaskStatus;
+    if (newStatus === TaskStatus.Completed) {
+        completeTask(task);
+    } else {
+        updateTask({ ...task, status: newStatus });
+    }
   };
 
   const handleUrgencyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -241,6 +328,10 @@ export const TaskDetail = () => {
       if(confirm('Remove this material?')) {
         updateTaskMaterials(task.id, task.materials.filter(m => m.id !== id));
       }
+  };
+  
+  const handleSaveRecurrence = (rule: RecurrenceRule | undefined) => {
+      updateTask({ ...task, recurrence: rule });
   };
 
   const getPersonName = (id: string) => {
@@ -460,6 +551,24 @@ export const TaskDetail = () => {
                 </div>
 
                 <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Repeat</label>
+                    <button 
+                        onClick={() => setShowRecurrenceModal(true)}
+                        className="w-full flex items-center justify-between bg-slate-800 p-2 rounded text-slate-300 hover:bg-slate-700"
+                    >
+                        <span className="text-sm flex items-center">
+                            <Repeat size={16} className="mr-2" />
+                            {task.recurrence ? (
+                                task.recurrence.type === 'Time' 
+                                ? `Every ${task.recurrence.interval} ${task.recurrence.unit}` 
+                                : `Every ${task.recurrence.usageThreshold} (Usage)`
+                            ) : 'Does not repeat'}
+                        </span>
+                        <Edit2 size={12} />
+                    </button>
+                </div>
+
+                <div>
                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Location</label>
                      <div className="flex items-center text-slate-300 bg-slate-800 p-2 rounded">
                         <MapPin size={16} className="mr-2 text-slate-400" />
@@ -494,7 +603,7 @@ export const TaskDetail = () => {
                         <div>
                             <p className="font-bold text-white text-sm">{linkedAsset.name}</p>
                             <p className="text-xs text-slate-500">{linkedAsset.make} {linkedAsset.model}</p>
-                            <Link to="/assets" className="text-xs text-indigo-400 hover:underline">View Asset</Link>
+                            <Link to={`/assets/${linkedAsset.id}`} className="text-xs text-indigo-400 hover:underline">View Asset</Link>
                         </div>
                     </div>
                  </div>
@@ -505,6 +614,7 @@ export const TaskDetail = () => {
       {/* Modals */}
       {showSubtaskModal && <AddSubtaskModal onClose={() => setShowSubtaskModal(false)} onSave={handleAddSubtask} />}
       {showMaterialModal && <MaterialModal onClose={() => setShowMaterialModal(false)} onSave={handleSaveMaterial} initialMaterial={editingMaterial || undefined} />}
+      {showRecurrenceModal && <RecurrenceModal task={task} onClose={() => setShowRecurrenceModal(false)} onSave={handleSaveRecurrence} />}
     </div>
   );
 };

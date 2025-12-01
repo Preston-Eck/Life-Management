@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './store/AppContext';
@@ -6,8 +7,10 @@ import { Dashboard } from './components/Dashboard';
 import { TaskList } from './components/TaskList';
 import { TaskDetail } from './components/TaskDetail';
 import { AssetList } from './components/AssetList';
+import { AssetDetail } from './components/AssetDetail';
 import { PeopleList } from './components/People';
 import { ShoppingList } from './components/Shopping';
+import { GoogleIntegrationModal } from './components/GoogleIntegration';
 
 const App: React.FC = () => {
   return (
@@ -19,8 +22,14 @@ const App: React.FC = () => {
             <Route path="/tasks" element={<TaskList />} />
             <Route path="/tasks/:taskId" element={<TaskDetail />} />
             <Route path="/assets" element={<AssetList />} />
+            <Route path="/assets/:assetId" element={<AssetDetail />} />
             <Route path="/people" element={<PeopleList />} />
             <Route path="/shopping" element={<ShoppingList />} />
+            <Route path="/google-sync" element={
+                 <div className="flex items-center justify-center h-full">
+                     <GoogleIntegrationModal onClose={() => window.history.back()} />
+                 </div>
+            } />
             <Route path="/library" element={
               <div className="text-center mt-20 text-slate-500">
                 <h2 className="text-2xl font-bold mb-2">Library Module</h2>

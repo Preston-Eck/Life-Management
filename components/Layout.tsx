@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink } from 'lucide-react';
+import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink, Cloud } from 'lucide-react';
 import { useAppStore } from '../store/AppContext';
-import { Notification } from '../types';
+import { GoogleIntegrationModal } from './GoogleIntegration';
 
 const NavItem = ({ to, icon: Icon, label, active }: any) => (
   <Link
@@ -22,6 +22,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'All' | 'Mentions'>('All');
   const { notifications, markNotificationRead, clearNotifications, snoozeNotification, pinNotification } = useAppStore();
 
@@ -81,88 +82,98 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             
             <div className="flex-1"></div>
 
-            <div className="relative">
-              <button 
-                onClick={() => setNotifOpen(!notifOpen)}
-                className="relative p-2 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-slate-800"
-              >
-                <Bell size={20} />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border border-slate-900"></span>
-                )}
-              </button>
+            <div className="flex items-center space-x-4">
+               <button 
+                onClick={() => setShowGoogleModal(true)}
+                className="p-2 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-slate-800"
+                title="Google Sync & Integrations"
+               >
+                 <Cloud size={20} />
+               </button>
 
-              {notifOpen && (
-                <div className="absolute right-0 mt-2 w-96 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                  <div className="p-3 border-b border-slate-800 bg-slate-900/95 backdrop-blur">
-                    <div className="flex justify-between items-center mb-2">
-                        <h3 className="font-semibold text-sm">Notifications</h3>
-                        <button onClick={clearNotifications} className="text-xs text-indigo-400 hover:text-indigo-300">Clear All</button>
+              <div className="relative">
+                <button 
+                  onClick={() => setNotifOpen(!notifOpen)}
+                  className="relative p-2 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-slate-800"
+                >
+                  <Bell size={20} />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border border-slate-900"></span>
+                  )}
+                </button>
+
+                {notifOpen && (
+                  <div className="absolute right-0 mt-2 w-96 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="p-3 border-b border-slate-800 bg-slate-900/95 backdrop-blur">
+                      <div className="flex justify-between items-center mb-2">
+                          <h3 className="font-semibold text-sm">Notifications</h3>
+                          <button onClick={clearNotifications} className="text-xs text-indigo-400 hover:text-indigo-300">Clear All</button>
+                      </div>
+                      <div className="flex space-x-2">
+                          <button 
+                              onClick={() => setActiveTab('All')}
+                              className={`flex-1 py-1 text-xs rounded transition-colors ${activeTab === 'All' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                          >
+                              All
+                          </button>
+                          <button 
+                              onClick={() => setActiveTab('Mentions')}
+                              className={`flex-1 py-1 text-xs rounded transition-colors ${activeTab === 'Mentions' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                          >
+                              Mentions Inbox
+                          </button>
+                      </div>
                     </div>
-                    <div className="flex space-x-2">
-                        <button 
-                            onClick={() => setActiveTab('All')}
-                            className={`flex-1 py-1 text-xs rounded transition-colors ${activeTab === 'All' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                        >
-                            All
-                        </button>
-                        <button 
-                            onClick={() => setActiveTab('Mentions')}
-                            className={`flex-1 py-1 text-xs rounded transition-colors ${activeTab === 'Mentions' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                        >
-                            Mentions Inbox
-                        </button>
-                    </div>
-                  </div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {displayedNotifications.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 text-sm">No new {activeTab === 'Mentions' ? 'mentions' : 'notifications'}</div>
-                    ) : (
-                      displayedNotifications.map(n => (
-                        <div key={n.id} className={`p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 transition-colors ${!n.isRead ? 'bg-indigo-500/5' : ''} ${n.isPinned ? 'border-l-4 border-l-amber-500' : ''}`}>
-                          <div className="flex justify-between items-start mb-1">
-                             <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                               n.type === 'Alert' ? 'bg-red-500/20 text-red-400' : 
-                               n.type === 'Assignment' ? 'bg-blue-500/20 text-blue-400' : 
-                               n.type === 'Mention' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-700 text-slate-300'
-                             }`}>{n.type}</span>
-                             <div className="flex space-x-1">
-                                {n.type === 'Mention' && (
-                                    <>
-                                        <button onClick={() => pinNotification(n.id)} title={n.isPinned ? "Unpin" : "Pin"} className={`p-1 rounded hover:bg-slate-700 ${n.isPinned ? 'text-amber-400' : 'text-slate-500'}`}>
-                                            <Pin size={12} />
-                                        </button>
-                                        <button onClick={() => handleSnooze(n.id)} title="Snooze 1h" className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-white">
-                                            <Clock size={12} />
-                                        </button>
-                                        {n.linkTo && (
-                                            <button 
-                                                onClick={() => {
-                                                    markNotificationRead(n.id);
-                                                    setNotifOpen(false);
-                                                    navigate(n.linkTo!);
-                                                }} 
-                                                title="Go to Task" 
-                                                className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-indigo-400"
-                                            >
-                                                <ExternalLink size={12} />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                                <button onClick={() => markNotificationRead(n.id)} title="Mark Read" className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-emerald-400">
-                                    <Check size={12}/>
-                                </button>
-                             </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      {displayedNotifications.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-sm">No new {activeTab === 'Mentions' ? 'mentions' : 'notifications'}</div>
+                      ) : (
+                        displayedNotifications.map(n => (
+                          <div key={n.id} className={`p-4 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 transition-colors ${!n.isRead ? 'bg-indigo-500/5' : ''} ${n.isPinned ? 'border-l-4 border-l-amber-500' : ''}`}>
+                            <div className="flex justify-between items-start mb-1">
+                               <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                                 n.type === 'Alert' ? 'bg-red-500/20 text-red-400' : 
+                                 n.type === 'Assignment' ? 'bg-blue-500/20 text-blue-400' : 
+                                 n.type === 'Mention' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-700 text-slate-300'
+                               }`}>{n.type}</span>
+                               <div className="flex space-x-1">
+                                  {n.type === 'Mention' && (
+                                      <>
+                                          <button onClick={() => pinNotification(n.id)} title={n.isPinned ? "Unpin" : "Pin"} className={`p-1 rounded hover:bg-slate-700 ${n.isPinned ? 'text-amber-400' : 'text-slate-500'}`}>
+                                              <Pin size={12} />
+                                          </button>
+                                          <button onClick={() => handleSnooze(n.id)} title="Snooze 1h" className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-white">
+                                              <Clock size={12} />
+                                          </button>
+                                          {n.linkTo && (
+                                              <button 
+                                                  onClick={() => {
+                                                      markNotificationRead(n.id);
+                                                      setNotifOpen(false);
+                                                      navigate(n.linkTo!);
+                                                  }} 
+                                                  title="Go to Task" 
+                                                  className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-indigo-400"
+                                              >
+                                                  <ExternalLink size={12} />
+                                              </button>
+                                          )}
+                                      </>
+                                  )}
+                                  <button onClick={() => markNotificationRead(n.id)} title="Mark Read" className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-emerald-400">
+                                      <Check size={12}/>
+                                  </button>
+                               </div>
+                            </div>
+                            <p className="text-sm text-slate-200 mb-1">{n.message}</p>
+                            <span className="text-xs text-slate-500">{new Date(n.timestamp).toLocaleTimeString()}</span>
                           </div>
-                          <p className="text-sm text-slate-200 mb-1">{n.message}</p>
-                          <span className="text-xs text-slate-500">{new Date(n.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                      ))
-                    )}
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
         </header>
 
@@ -170,6 +181,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           {children}
         </div>
       </main>
+
+      {showGoogleModal && <GoogleIntegrationModal onClose={() => setShowGoogleModal(false)} />}
     </div>
   );
 };

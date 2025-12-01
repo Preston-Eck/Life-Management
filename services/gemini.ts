@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { Task, Urgency, Importance, ReceiptParsedItem } from "../types";
+import { Task, Urgency, Importance, ReceiptParsedItem, TaskSuggestion } from "../types";
 
 const apiKey = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
@@ -70,13 +71,13 @@ export const estimateMaterials = async (taskTitle: string): Promise<{ name: stri
   }
 };
 
-export const parseReceiptImage = async (base64Image: string): Promise<{ vendor: string; items: ReceiptParsedItem[] }> => {
+export const parseReceipt = async (base64Data: string, mimeType: string = "image/jpeg"): Promise<{ vendor: string; items: ReceiptParsedItem[] }> => {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: {
         parts: [
-          { inlineData: { mimeType: "image/jpeg", data: base64Image } },
+          { inlineData: { mimeType: mimeType, data: base64Data } },
           { text: "Analyze this receipt. Extract the vendor name and a list of all items purchased with their quantities and prices. Return JSON." }
         ]
       },
@@ -112,5 +113,62 @@ export const parseReceiptImage = async (base64Image: string): Promise<{ vendor: 
   } catch (error) {
     console.error("Gemini Receipt Error:", error);
     return { vendor: "Error", items: [] };
+  }
+};
+
+// --- Mock Integration for Google Account Scanning ---
+export const scanGoogleData = async (accounts: string[]): Promise<TaskSuggestion[]> => {
+  // In a real app, this would fetch email headers/calendar events using the Gmail/Calendar APIs.
+  // Then it would pass those headers/summaries to Gemini to extract tasks.
+  // Here we mock the input data but use Gemini to "Parse" the mock emails.
+  
+  const mockEmails = [
+    "Subject: HOA Meeting on Tuesday\nBody: Don't forget to bring the financial reports for the HOA meeting next Tuesday at 7 PM.",
+    "Subject: Car Maintenance\nBody: Your Toyota Highlander is due for a tire rotation in 2 weeks.",
+    "Subject: Soccer Practice\nBody: Leo needs new cleats before the season starts next month.",
+    "Subject: Flight Confirmed\nBody: Flight to NYC confirmed for Dec 15th."
+  ];
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Analyze these email snippets and extract potential to-do list tasks. 
+      Ignore items that are just information (like Flight Confirmed) unless there is a preparation task.
+      Emails: ${JSON.stringify(mockEmails)}`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+             type: Type.OBJECT,
+             properties: {
+               title: { type: Type.STRING },
+               description: { type: Type.STRING },
+               source: { type: Type.STRING, enum: ['Gmail', 'Calendar'] },
+               confidence: { type: Type.NUMBER }
+             },
+             required: ['title', 'description', 'source', 'confidence']
+          }
+        }
+      }
+    });
+
+    if (response.text) {
+        const raw = JSON.parse(response.text);
+        return raw.map((r: any, idx: number) => ({
+            id: `sug-${Date.now()}-${idx}`,
+            sourceAccount: accounts[0] || 'unknown',
+            ...r
+        }));
+    }
+    return [];
+
+  } catch (error) {
+    console.error("Gemini Scan Error", error);
+    // Fallback Mock Data if API fails
+    return [
+        { id: 'm1', source: 'Gmail', sourceAccount: accounts[0], title: 'Print HOA Reports', description: 'From Email: HOA Meeting on Tuesday', confidence: 0.9 },
+        { id: 'm2', source: 'Gmail', sourceAccount: accounts[0], title: 'Buy Soccer Cleats', description: 'For Leo, before season starts', confidence: 0.95 }
+    ];
   }
 };
