@@ -1,4 +1,5 @@
 
+
 export enum Urgency {
   NotUrgent = 1,
   Low = 2,
@@ -35,6 +36,8 @@ export enum ShoppingStatus {
   Acquired = 'Acquired',
 }
 
+export type ShoppingCategory = string;
+
 export interface GoogleAccount {
   id: string;
   email: string;
@@ -62,6 +65,17 @@ export interface RecurrenceRule {
   assetId?: string;
   usageThreshold?: number; // e.g., every 5000 miles
   lastUsageReading?: number; // usage at last completion
+  
+  // Usage Check Reminder (New)
+  usageCheckInterval?: number; // e.g. every 1
+  usageCheckUnit?: 'day' | 'week' | 'month' | 'year';
+  lastUsageCheckDate?: string; 
+
+  // End Conditions
+  endCondition?: 'Never' | 'Date' | 'Count';
+  endDate?: string; // ISO Date string
+  endCount?: number; // Total number of occurrences
+  currentCount?: number; // How many times it has recurred so far
 }
 
 export interface Comment {
@@ -103,6 +117,14 @@ export interface Material {
   isOnHand: boolean;
 }
 
+export interface Attachment {
+  id: string;
+  type: 'Image' | 'File';
+  name: string;
+  url: string; // Base64 or URL
+  uploadedAt: string;
+}
+
 export interface Task {
   id: string;
   ownerId: string; // Person ID of the creator
@@ -112,6 +134,7 @@ export interface Task {
   subtaskIds: string[];
   prerequisiteIds: string[];
   dueDate?: string;
+  timeEstimate?: number; // In Hours
   urgency: Urgency;
   importance: Importance;
   status: TaskStatus;
@@ -121,6 +144,7 @@ export interface Task {
   subLocation?: string;
   assetId?: string; // Link to asset being serviced
   materials: Material[];
+  attachments: Attachment[];
   comments: Comment[];
   context: 'Work' | 'Personal' | 'Family' | 'School' | 'Other';
   costCache?: number; // Calculated total cost
@@ -144,17 +168,21 @@ export interface Asset {
   usageUnit?: string; // "Miles", "Hours", "Cycles"
 }
 
+export interface VendorLocation {
+  id: string;
+  label: string; // e.g. "Downtown Store", "Warehouse"
+  address: string;
+  salesRep?: string;
+  phone?: string;
+  email?: string;
+}
+
 export interface Vendor {
   id: string;
   name: string;
   url?: string;
-  addresses: {
-    label: string;
-    address: string;
-    phone?: string;
-    salesRep?: string;
-    email?: string;
-  }[];
+  categories: ShoppingCategory[];
+  addresses: VendorLocation[];
 }
 
 export interface ShoppingItem {
@@ -164,6 +192,8 @@ export interface ShoppingItem {
   unitPrice: number;
   totalCost: number;
   vendorId?: string;
+  vendorLocationId?: string; // Link to specific vendor address
+  category?: ShoppingCategory;
   url?: string;
   status: ShoppingStatus;
   statusUpdatedDate: string;

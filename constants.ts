@@ -1,5 +1,5 @@
 
-import { Person, Task, Asset, ShoppingItem, Urgency, Importance, TaskStatus, AssetType, ShoppingStatus, Organization, GoogleAccount } from './types';
+import { Person, Task, Asset, ShoppingItem, Urgency, Importance, TaskStatus, AssetType, ShoppingStatus, Organization, GoogleAccount, Vendor, ShoppingCategory } from './types';
 
 // Standard Relationships for Dropdowns
 export const RELATIONSHIP_TYPES = [
@@ -7,6 +7,10 @@ export const RELATIONSHIP_TYPES = [
   'Aunt/Uncle', 'Niece/Nephew', 'Cousin',
   'Friend', 'Co-Worker', 'Employer', 'Employee', 
   'Teacher', 'Student', 'Mentor', 'Mentee', 'Other'
+];
+
+export const SHOPPING_CATEGORIES: ShoppingCategory[] = [
+    'Grocery', 'Hardware', 'Clothing', 'Electronics', 'Home Goods', 'Pharmacy', 'Automotive', 'Office', 'Other'
 ];
 
 export const MOCK_ORGS: Organization[] = [
@@ -20,6 +24,33 @@ export const MOCK_GOOGLE_ACCOUNTS: GoogleAccount[] = [
         email: 'alex.mercer@gmail.com', 
         services: ['Gmail', 'Calendar', 'Drive'], 
         lastSync: new Date().toISOString() 
+    }
+];
+
+export const MOCK_VENDORS: Vendor[] = [
+    {
+        id: 'v1',
+        name: 'Whole Foods Market',
+        categories: ['Grocery', 'Pharmacy', 'Home Goods'],
+        addresses: [
+            { id: 'va1', label: 'Downtown', address: '123 Main St', phone: '555-0123' }
+        ]
+    },
+    {
+        id: 'v2',
+        name: 'Home Depot',
+        categories: ['Hardware', 'Home Goods', 'Automotive'],
+        addresses: [
+            { id: 'va2', label: 'Westside', address: '456 Oak Ave', phone: '555-0987', salesRep: 'Bob the Builder' }
+        ],
+        url: 'https://homedepot.com'
+    },
+    {
+        id: 'v3',
+        name: 'Amazon',
+        categories: ['Electronics', 'Home Goods', 'Clothing', 'Office', 'Other'],
+        addresses: [],
+        url: 'https://amazon.com'
     }
 ];
 
@@ -141,8 +172,10 @@ export const MOCK_TASKS: Task[] = [
     collaboratorIds: ['p2'],
     context: 'Family',
     materials: [],
+    attachments: [],
     comments: [],
-    location: 'Home'
+    location: 'Home',
+    timeEstimate: 8
   },
   {
     id: 't2',
@@ -161,6 +194,8 @@ export const MOCK_TASKS: Task[] = [
     assetId: 'a1',
     location: 'Garage',
     comments: [],
+    attachments: [],
+    timeEstimate: 1.5,
     materials: [
       { id: 'm1', name: '0W-20 Synthetic Oil', quantity: 6, unit: 'Quarts', isOnHand: false, shoppingItemId: 's1' },
       { id: 'm2', name: 'Oil Filter', quantity: 1, unit: 'Pc', isOnHand: true }
@@ -187,7 +222,9 @@ export const MOCK_TASKS: Task[] = [
     collaboratorIds: ['p1'],
     context: 'Family',
     materials: [],
+    attachments: [],
     comments: [],
+    timeEstimate: 3
   }
 ];
 
@@ -201,6 +238,9 @@ export const MOCK_SHOPPING: ShoppingItem[] = [
     status: ShoppingStatus.Need,
     statusUpdatedDate: new Date().toISOString(),
     taskId: 't2',
-    url: 'https://amazon.com'
+    url: 'https://amazon.com',
+    vendorId: 'v2',
+    vendorLocationId: 'va2',
+    category: 'Automotive'
   }
 ];

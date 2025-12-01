@@ -116,6 +116,124 @@ export const parseReceipt = async (base64Data: string, mimeType: string = "image
   }
 };
 
+export const generateDailyPlan = async (tasks: Task[], workHoursLimit: number): Promise<{ schedule: { taskId: string, reason: string }[], explanation: string }> => {
+  try {
+    const simpleTasks = tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      urgency: t.urgency,
+      importance: t.importance,
+      dueDate: t.dueDate,
+      context: t.context,
+      timeEstimate: t.timeEstimate || 1 // Default to 1 hour if not set
+    }));
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Analyze these tasks and create a prioritized daily schedule.
+      Constraints:
+      1. Limit 'Work' context tasks to a maximum of ${workHoursLimit} total hours.
+      2. Prioritize high urgency and high importance tasks.
+      3. Prioritize overdue or due-today tasks.
+      
+      Tasks: ${JSON.stringify(simpleTasks)}
+      
+      Return JSON with a 'schedule' array (taskId, reason) and a general 'explanation' string.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            schedule: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                    taskId: { type: Type.STRING },
+                    reason: { type: Type.STRING }
+                }
+              }
+            },
+            explanation: { type: Type.STRING }
+          }
+        }
+      }
+    });
+
+    if (response.text) {
+        return JSON.parse(response.text);
+    }
+    return { schedule: [], explanation: "Could not generate plan." };
+  } catch (error) {
+      console.error("Gemini Planner Error", error);
+      return { schedule: [], explanation: "Error generating plan." };
+  }
+};
+
+export const suggestCategory = async (name: string, type: 'Vendor' | 'Item', existingCategories: string[]): Promise<string[]> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Suggest 1-3 categories for the ${type} named "${name}". 
+      Prefer matching categories from this existing list: ${existingCategories.join(', ')}.
+      If none fit well, suggest a new concise category name.
+      Return JSON array of strings.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING }
+        }
+      }
+    });
+
+    if (response.text) {
+      return JSON.parse(response.text);
+    }
+    return [];
+  } catch (error) {
+    console.error("Gemini Category Error", error);
+    return [];
+  }
+};
+
+export const analyzeTaskAttributes = async (title: string, description: string): Promise<{ urgency: Urgency, importance: Importance, context: string, timeEstimate: number }> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Analyze the task title and description. 
+      Determine the appropriate Urgency (1=Not Urgent, 4=Urgent), Importance (1=Not Important, 4=Very Important), 
+      Context (Work, Personal, Family, School, Other), and Time Estimate (in hours).
+      
+      Task Title: "${title}"
+      Task Description: "${description}"
+      `,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            urgency: { type: Type.INTEGER, description: "1 to 4" },
+            importance: { type: Type.INTEGER, description: "1 to 4" },
+            context: { type: Type.STRING, enum: ["Work", "Personal", "Family", "School", "Other"] },
+            timeEstimate: { type: Type.NUMBER, description: "Estimated hours to complete" }
+          },
+          required: ["urgency", "importance", "context", "timeEstimate"]
+        }
+      }
+    });
+
+    if (response.text) {
+      return JSON.parse(response.text);
+    }
+    // Fallback defaults
+    return { urgency: Urgency.Medium, importance: Importance.High, context: 'Personal', timeEstimate: 1 };
+  } catch (error) {
+    console.error("Gemini Attribute Analysis Error", error);
+    return { urgency: Urgency.Medium, importance: Importance.High, context: 'Personal', timeEstimate: 1 };
+  }
+};
+
 // --- Mock Integration for Google Account Scanning ---
 export const scanGoogleData = async (accounts: string[]): Promise<TaskSuggestion[]> => {
   // In a real app, this would fetch email headers/calendar events using the Gmail/Calendar APIs.

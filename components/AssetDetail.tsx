@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
@@ -115,7 +114,8 @@ export const AssetDetail = () => {
             context: 'Family',
             materials: [],
             comments: [],
-            dueDate: data.dueDate
+            dueDate: data.dueDate,
+            attachments: []
         };
         addTask(newTask);
         setShowServiceModal(false);

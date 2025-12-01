@@ -1,7 +1,6 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Task, Person, Asset, ShoppingItem, Notification, ActivityLog, ShoppingStatus, Urgency, Comment, Material, Importance, TaskStatus, SharePermission, Organization, GoogleAccount, TaskSuggestion } from '../types';
-import { MOCK_TASKS, MOCK_PEOPLE, MOCK_ASSETS, MOCK_SHOPPING, MOCK_ORGS, MOCK_GOOGLE_ACCOUNTS } from '../constants';
+import { Task, Person, Asset, ShoppingItem, Notification, ActivityLog, ShoppingStatus, Urgency, Comment, Material, Importance, TaskStatus, SharePermission, Organization, GoogleAccount, TaskSuggestion, Vendor } from '../types';
+import { MOCK_TASKS, MOCK_PEOPLE, MOCK_ASSETS, MOCK_SHOPPING, MOCK_ORGS, MOCK_GOOGLE_ACCOUNTS, MOCK_VENDORS, SHOPPING_CATEGORIES } from '../constants';
 import { scanGoogleData } from '../services/gemini';
 
 const generateIdHelper = () => Math.random().toString(36).substr(2, 9);
@@ -15,12 +14,16 @@ interface AppState {
   notifications: Notification[];
   activityLog: ActivityLog[];
   organizations: Organization[];
+  vendors: Vendor[];
   
   googleAccounts: GoogleAccount[];
   taskSuggestions: TaskSuggestion[];
   
   customFieldDefs: string[];
   addCustomFieldDef: (fieldName: string) => void;
+
+  shoppingCategories: string[];
+  addShoppingCategory: (category: string) => void;
 
   addTask: (task: Task) => void;
   updateTask: (task: Task) => void;
@@ -37,6 +40,10 @@ interface AppState {
   updateShoppingItem: (item: ShoppingItem) => void;
   deleteShoppingItem: (id: string) => void;
   processReceiptItems: (items: any[]) => void;
+  
+  addVendor: (vendor: Vendor) => void;
+  updateVendor: (vendor: Vendor) => void;
+  deleteVendor: (id: string) => void;
   
   addPerson: (person: Person) => void;
   updatePerson: (person: Person) => void;
@@ -56,6 +63,7 @@ interface AppState {
   deleteComment: (taskId: string, commentId: string) => void;
   
   updateTaskMaterials: (taskId: string, materials: Material[]) => void;
+  getTaskTotalCost: (taskId: string) => number;
   
   // Google Integrations
   linkGoogleAccount: (email: string) => void;
@@ -97,6 +105,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGS);
+  const [vendors, setVendors] = useState<Vendor[]>(MOCK_VENDORS);
+  const [shoppingCategories, setShoppingCategories] = useState<string[]>(SHOPPING_CATEGORIES);
   
   // Google Integration State
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>(MOCK_GOOGLE_ACCOUNTS);
@@ -118,9 +128,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    // Initial notifications check
+    // Notifications check
     const newNotifs: Notification[] = [];
+    
     tasks.forEach(t => {
+      // 1. Overdue Check
       if (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'Completed') {
         newNotifs.push({
           id: `overdue-${t.id}`,
@@ -132,18 +144,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           linkTo: `/tasks/${t.id}`
         });
       }
+
+      // 2. Usage Reminder Check
+      if (t.recurrence?.type === 'Usage' && t.recurrence.usageCheckInterval && t.assetId && t.status !== 'Completed') {
+          const rule = t.recurrence;
+          // Default to task creation/update time if check date is missing to avoid immediate spam
+          const lastCheck = rule.lastUsageCheckDate ? new Date(rule.lastUsageCheckDate) : new Date(); 
+          const nextCheck = new Date(lastCheck);
+          const interval = rule.usageCheckInterval;
+
+          if (rule.usageCheckUnit === 'day') nextCheck.setDate(nextCheck.getDate() + interval);
+          if (rule.usageCheckUnit === 'week') nextCheck.setDate(nextCheck.getDate() + (interval * 7));
+          if (rule.usageCheckUnit === 'month') nextCheck.setMonth(nextCheck.getMonth() + interval);
+          if (rule.usageCheckUnit === 'year') nextCheck.setFullYear(nextCheck.getFullYear() + interval);
+
+          if (new Date() > nextCheck) {
+               const assetName = assets.find(a => a.id === t.assetId)?.name || 'Asset';
+               newNotifs.push({
+                  id: `usage-check-${t.id}`,
+                  type: 'System',
+                  title: 'Usage Check Needed',
+                  message: `Time to update usage for ${assetName} (Task: ${t.title})`,
+                  timestamp: new Date().toISOString(),
+                  isRead: false,
+                  linkTo: `/assets/${t.assetId}`,
+                  actionRequired: true
+               });
+          }
+      }
     });
+
     setNotifications(prev => {
         const existingIds = new Set(prev.map(n => n.id));
         const uniqueNew = newNotifs.filter(n => !existingIds.has(n.id));
         return [...uniqueNew, ...prev];
     });
-  }, [tasks.length]); // Simple dependency for demo
+  }, [tasks.length, assets]); // Depend on tasks and assets
 
   const addCustomFieldDef = (fieldName: string) => {
     if (!customFieldDefs.includes(fieldName)) {
       setCustomFieldDefs([...customFieldDefs, fieldName]);
       logActivity("Added Global Field", fieldName);
+    }
+  };
+  
+  const addShoppingCategory = (category: string) => {
+    if (category && !shoppingCategories.includes(category)) {
+        setShoppingCategories(prev => [...prev, category].sort());
+        logActivity("Added Shopping Category", category);
     }
   };
 
@@ -157,9 +205,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logActivity("Updated Task", updatedTask.title);
   };
 
-  // Special handler for marking done to support Recurrence
+  // Helper to get total cost (hoisted for use in completeTask)
+  const calculateTaskCostRecursive = (taskId: string, currentTasks: Task[], currentShoppingList: ShoppingItem[]): number => {
+      const task = currentTasks.find(t => t.id === taskId);
+      if (!task) return 0;
+
+      // If task is completed and has a cached cost, use it to preserve history
+      if (task.status === TaskStatus.Completed && task.costCache !== undefined) {
+          return task.costCache;
+      }
+
+      // 1. Calculate cost from materials (via linked shopping items)
+      let materialCost = 0;
+      task.materials.forEach(mat => {
+          if (mat.shoppingItemId) {
+              const shopItem = currentShoppingList.find(s => s.id === mat.shoppingItemId);
+              if (shopItem) {
+                  materialCost += shopItem.totalCost;
+              }
+          }
+      });
+
+      // 2. Calculate cost from subtasks (Recursive)
+      let subtaskCost = 0;
+      task.subtaskIds.forEach(subId => {
+          subtaskCost += calculateTaskCostRecursive(subId, currentTasks, currentShoppingList);
+      });
+
+      return materialCost + subtaskCost;
+  };
+
+  // Exposed wrapper for components
+  const getTaskTotalCost = (taskId: string): number => {
+      return calculateTaskCostRecursive(taskId, tasks, shoppingList);
+  };
+
+  // Special handler for marking done to support Recurrence and Cost Freezing
   const completeTask = (task: Task) => {
-      const updated = { ...task, status: TaskStatus.Completed };
+      // Calculate final cost to freeze it
+      const finalCost = getTaskTotalCost(task.id);
+      
+      const updated = { 
+          ...task, 
+          status: TaskStatus.Completed,
+          costCache: finalCost 
+      };
+
       let newTasks = tasks.map(t => t.id === task.id ? updated : t);
 
       // Handle Recurrence
@@ -167,43 +258,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const rule = task.recurrence;
           let nextDueDate = new Date();
           let shouldRecur = false;
-
-          if (rule.type === 'Time') {
-              shouldRecur = true;
-              const interval = rule.interval || 1;
-              const currentDue = task.dueDate ? new Date(task.dueDate) : new Date();
-              
-              if (rule.unit === 'day') nextDueDate.setDate(currentDue.getDate() + interval);
-              if (rule.unit === 'week') nextDueDate.setDate(currentDue.getDate() + (interval * 7));
-              if (rule.unit === 'month') nextDueDate.setMonth(currentDue.getMonth() + interval);
-              if (rule.unit === 'year') nextDueDate.setFullYear(currentDue.getFullYear() + interval);
-          }
-          // Note: Usage based recurrence is handled in updateAssetUsage usually, but if it's "Every X miles" and we just finished it, 
-          // we might want to reset the 'lastUsageReading' on the task rule
           
-          if (rule.type === 'Usage' && task.assetId) {
-             // For usage tasks, we don't necessarily create a NEW task with a date immediately, 
-             // but we reset the tracking. Or we create a pending task waiting for the trigger.
-             // Strategy: Reset this task to Pending and update its lastUsageReading to current asset usage
-             const asset = assets.find(a => a.id === task.assetId);
-             if (asset && asset.currentUsage !== undefined) {
-                 shouldRecur = true;
-                 updated.status = TaskStatus.Completed; // Keep old one completed
-                 // Prepare logic below to create new
-             }
+          // Increment Count
+          const currentCount = (rule.currentCount || 0) + 1;
+          
+          // Check End Conditions
+          let limitReached = false;
+          if (rule.endCondition === 'Count' && rule.endCount) {
+             if (currentCount >= rule.endCount) limitReached = true;
           }
 
-          if (shouldRecur) {
-             const nextTask: Task = {
-                 ...task,
-                 id: generateIdHelper(),
-                 status: TaskStatus.Pending,
-                 dueDate: rule.type === 'Time' ? nextDueDate.toISOString() : undefined,
-                 recurrence: rule.type === 'Usage' ? { ...rule, lastUsageReading: assets.find(a=>a.id === task.assetId)?.currentUsage || 0 } : rule,
-                 comments: [], // Clear comments for new instance
-             };
-             newTasks.push(nextTask);
-             logActivity("Recurrence Triggered", nextTask.title);
+          if (!limitReached) {
+            if (rule.type === 'Time') {
+                shouldRecur = true;
+                const interval = rule.interval || 1;
+                const currentDue = task.dueDate ? new Date(task.dueDate) : new Date();
+                
+                if (rule.unit === 'day') nextDueDate.setDate(currentDue.getDate() + interval);
+                if (rule.unit === 'week') nextDueDate.setDate(currentDue.getDate() + (interval * 7));
+                if (rule.unit === 'month') nextDueDate.setMonth(currentDue.getMonth() + interval);
+                if (rule.unit === 'year') nextDueDate.setFullYear(currentDue.getFullYear() + interval);
+                
+                // Check Date Limit
+                if (rule.endCondition === 'Date' && rule.endDate) {
+                    if (nextDueDate > new Date(rule.endDate)) shouldRecur = false;
+                }
+            }
+            
+            if (rule.type === 'Usage' && task.assetId) {
+               const asset = assets.find(a => a.id === task.assetId);
+               if (asset && asset.currentUsage !== undefined) {
+                   shouldRecur = true;
+               }
+            }
+
+            if (shouldRecur) {
+               const nextTask: Task = {
+                   ...task,
+                   id: generateIdHelper(),
+                   status: TaskStatus.Pending,
+                   dueDate: rule.type === 'Time' ? nextDueDate.toISOString() : undefined,
+                   recurrence: { 
+                       ...rule, 
+                       currentCount: currentCount,
+                       lastUsageReading: rule.type === 'Usage' ? assets.find(a=>a.id === task.assetId)?.currentUsage || 0 : rule.lastUsageReading 
+                   },
+                   comments: [], // Clear comments for new instance
+                   costCache: undefined // Reset cost cache for new instance
+               };
+               newTasks.push(nextTask);
+               logActivity("Recurrence Triggered", nextTask.title);
+            }
           }
       }
       
@@ -235,7 +340,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       collaboratorIds: [],
       context: parent.context,
       materials: [],
-      comments: []
+      comments: [],
+      attachments: []
     };
 
     const updatedParent = {
@@ -265,32 +371,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAssets(assets.map(a => a.id === assetId ? newAsset : a));
       logActivity("Updated Usage", `${asset.name}: ${usage} ${asset.usageUnit}`);
 
-      // Check for Usage-based Recurrence triggers
-      tasks.forEach(t => {
-          if (t.recurrence && t.recurrence.type === 'Usage' && t.recurrence.assetId === assetId && t.status !== TaskStatus.Completed) {
-              const rule = t.recurrence;
-              const lastReading = rule.lastUsageReading || 0;
-              const threshold = rule.usageThreshold || 0;
-              
-              if (usage - lastReading >= threshold) {
-                  // Trigger Alert or Status Change
-                  if (t.status === TaskStatus.Pending) {
-                      // It's due now!
-                      // For this prototype, we'll just send a notification, as the task exists
-                      setNotifications(prev => [...prev, {
-                          id: generateIdHelper(),
-                          type: 'Alert',
-                          title: 'Maintenance Due',
-                          message: `Task "${t.title}" is due based on usage.`,
-                          timestamp: new Date().toISOString(),
-                          isRead: false,
-                          linkTo: `/tasks/${t.id}`
-                      }]);
-                      updateTask({ ...t, urgency: Urgency.Urgent }); // Bump urgency
-                  }
-              }
+      // Process Usage-Based Recurrence Logic
+      const updatedTasks = tasks.map(t => {
+          // Update last check date if this task cares about this asset
+          if (t.assetId === assetId && t.recurrence?.type === 'Usage') {
+               const newRecurrence = {
+                   ...t.recurrence,
+                   lastUsageCheckDate: new Date().toISOString()
+               };
+               
+               // Check if threshold met to trigger urgency
+               const rule = t.recurrence;
+               const lastReading = rule.lastUsageReading || 0;
+               const threshold = rule.usageThreshold || 0;
+               
+               let urgencyUpdate = t.urgency;
+               let notificationToAdd: Notification | null = null;
+
+               if (usage - lastReading >= threshold && t.status !== TaskStatus.Completed) {
+                   if (t.status === TaskStatus.Pending) {
+                       urgencyUpdate = Urgency.Urgent;
+                       notificationToAdd = {
+                           id: generateIdHelper(),
+                           type: 'Alert',
+                           title: 'Maintenance Due',
+                           message: `Task "${t.title}" is due based on usage.`,
+                           timestamp: new Date().toISOString(),
+                           isRead: false,
+                           linkTo: `/tasks/${t.id}`
+                       };
+                   }
+               }
+               
+               if (notificationToAdd) {
+                   setNotifications(prev => [...prev, notificationToAdd!]);
+               }
+
+               return { ...t, urgency: urgencyUpdate, recurrence: newRecurrence };
           }
+          return t;
       });
+
+      // Only update state if tasks actually changed
+      if (JSON.stringify(updatedTasks) !== JSON.stringify(tasks)) {
+          setTasks(updatedTasks);
+      }
   };
 
   const deleteAsset = (id: string) => {
@@ -342,6 +467,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setShoppingList([...updatedList, ...newItems]);
+  };
+
+  const addVendor = (vendor: Vendor) => {
+    setVendors([...vendors, vendor]);
+    logActivity("Added Vendor", vendor.name);
+  };
+
+  const updateVendor = (vendor: Vendor) => {
+    setVendors(vendors.map(v => v.id === vendor.id ? vendor : v));
+    logActivity("Updated Vendor", vendor.name);
+  };
+
+  const deleteVendor = (id: string) => {
+    setVendors(vendors.filter(v => v.id !== id));
+    logActivity("Deleted Vendor", id);
   };
 
   const addPerson = (person: Person) => {
@@ -513,10 +653,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateTask({ ...task, comments: updatedComments });
   };
 
+  // Enhanced Update Task Materials to Sync with Shopping List
   const updateTaskMaterials = (taskId: string, materials: Material[]) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
-    updateTask({ ...task, materials });
+
+    let updatedShoppingList = [...shoppingList];
+    const updatedMaterials = [...materials];
+
+    updatedMaterials.forEach((mat, index) => {
+        // If material doesn't have a linked shopping item, create one
+        if (!mat.shoppingItemId) {
+            const newShoppingItem: ShoppingItem = {
+                id: generateIdHelper(),
+                name: mat.name,
+                quantity: mat.quantity,
+                unitPrice: 0, // Needs manual or AI input
+                totalCost: 0,
+                status: mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need,
+                statusUpdatedDate: new Date().toISOString(),
+                taskId: taskId
+            };
+            updatedShoppingList.push(newShoppingItem);
+            updatedMaterials[index] = { ...mat, shoppingItemId: newShoppingItem.id };
+        } else {
+            // Sync status if linked
+            const shopItemIndex = updatedShoppingList.findIndex(s => s.id === mat.shoppingItemId);
+            if (shopItemIndex >= 0) {
+                const currentStatus = updatedShoppingList[shopItemIndex].status;
+                const newStatus = mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need;
+                
+                // Only update if conflicting states (e.g. material says onHand but shopping says Need)
+                if (mat.isOnHand && currentStatus !== ShoppingStatus.Acquired) {
+                    updatedShoppingList[shopItemIndex] = {
+                        ...updatedShoppingList[shopItemIndex],
+                        status: ShoppingStatus.Acquired,
+                        statusUpdatedDate: new Date().toISOString()
+                    };
+                } else if (!mat.isOnHand && currentStatus === ShoppingStatus.Acquired) {
+                     updatedShoppingList[shopItemIndex] = {
+                        ...updatedShoppingList[shopItemIndex],
+                        status: ShoppingStatus.Need,
+                        statusUpdatedDate: new Date().toISOString()
+                    };
+                }
+            }
+        }
+    });
+
+    setShoppingList(updatedShoppingList);
+    updateTask({ ...task, materials: updatedMaterials });
   };
 
   // --- Google Account Logic ---
@@ -563,7 +749,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           comments: [],
           materials: [],
           context: 'Personal',
-          dueDate: suggestion.dueDate
+          dueDate: suggestion.dueDate,
+          attachments: []
       };
       addTask(newTask);
       setTaskSuggestions(prev => prev.filter(s => s.id !== suggestion.id));
@@ -576,14 +763,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{ 
-      tasks, people, assets, shoppingList, currentUser, notifications, activityLog, organizations, customFieldDefs,
-      googleAccounts, taskSuggestions,
-      addCustomFieldDef,
+      tasks, people, assets, shoppingList, currentUser, notifications, activityLog, organizations, vendors, customFieldDefs,
+      googleAccounts, taskSuggestions, shoppingCategories,
+      addShoppingCategory, addCustomFieldDef,
       addTask, updateTask, deleteTask, completeTask, addSubtask, addAsset, updateAsset, deleteAsset, updateAssetUsage,
       addShoppingItem, updateShoppingItem, deleteShoppingItem, processReceiptItems,
+      addVendor, updateVendor, deleteVendor,
       addPerson, updatePerson, sharePerson, addOrganization, updateOrganization, deleteOrganization,
       markNotificationRead, snoozeNotification, pinNotification, clearNotifications, 
-      addComment, editComment, deleteComment, updateTaskMaterials,
+      addComment, editComment, deleteComment, updateTaskMaterials, getTaskTotalCost,
       linkGoogleAccount, unlinkGoogleAccount, generateTaskSuggestions, acceptSuggestion, rejectSuggestion
     }}>
       {children}

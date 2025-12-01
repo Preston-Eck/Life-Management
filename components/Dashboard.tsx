@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/AppContext';
 import { TaskStatus, Urgency } from '../types';
-import { AlertTriangle, CheckCircle, ShoppingCart, Activity, Settings, BookOpen, Camera } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShoppingCart, Activity, Settings, BookOpen, Camera, BrainCircuit, Play, Clock, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { parseReceipt } from '../services/gemini';
+import { parseReceipt, generateDailyPlan } from '../services/gemini';
 
 const StatCard = ({ title, value, icon: Icon, colorClass, to }: any) => (
   <Link to={to} className="bg-slate-900 p-6 rounded-xl border border-slate-800 hover:border-slate-700 transition-all shadow-lg hover:shadow-xl cursor-pointer block">
@@ -20,6 +20,91 @@ const StatCard = ({ title, value, icon: Icon, colorClass, to }: any) => (
   </Link>
 );
 
+const DailyPlannerWidget = () => {
+    const { tasks } = useAppStore();
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [plan, setPlan] = useState<{ taskId: string, reason: string }[] | null>(null);
+    const [explanation, setExplanation] = useState('');
+    const [workHours, setWorkHours] = useState(8);
+    const [showConfig, setShowConfig] = useState(false);
+
+    const handleGenerate = async () => {
+        setIsGenerating(true);
+        const incompleteTasks = tasks.filter(t => t.status !== TaskStatus.Completed);
+        const result = await generateDailyPlan(incompleteTasks, workHours);
+        setPlan(result.schedule);
+        setExplanation(result.explanation);
+        setIsGenerating(false);
+        setShowConfig(false);
+    };
+
+    const getTask = (id: string) => tasks.find(t => t.id === id);
+
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+            <div className="flex justify-between items-center mb-4">
+                 <h3 className="text-xl font-bold flex items-center text-white">
+                     <BrainCircuit size={20} className="mr-2 text-purple-400" />
+                     AI Day Planner
+                 </h3>
+                 <button onClick={() => setShowConfig(!showConfig)} className="text-slate-500 hover:text-white"><Settings size={16}/></button>
+            </div>
+
+            {showConfig && (
+                <div className="mb-4 bg-slate-800 p-3 rounded-lg border border-slate-700">
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Work Limit (Hours)</label>
+                    <div className="flex gap-2">
+                        <input type="number" value={workHours} onChange={e => setWorkHours(Number(e.target.value))} className="w-20 bg-slate-900 border border-slate-600 rounded p-1 text-white text-center" />
+                        <button onClick={handleGenerate} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 rounded text-sm font-bold flex-1">
+                            Regenerate Plan
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {!plan && !isGenerating && (
+                <div className="text-center py-6">
+                    <p className="text-slate-400 mb-4 text-sm">Let AI prioritize your day based on urgency, importance, and deadlines.</p>
+                    <button onClick={handleGenerate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold flex items-center mx-auto">
+                        <Play size={16} className="mr-2" /> Generate Schedule
+                    </button>
+                </div>
+            )}
+
+            {isGenerating && (
+                 <div className="text-center py-8">
+                     <div className="animate-spin w-8 h-8 border-4 border-indigo-500 rounded-full border-t-transparent mx-auto mb-3"></div>
+                     <p className="text-slate-400 text-sm">Analyzing priorities...</p>
+                 </div>
+            )}
+
+            {plan && !isGenerating && (
+                <div className="space-y-4">
+                    <p className="text-xs text-slate-400 italic bg-slate-800/50 p-2 rounded">{explanation}</p>
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+                        {plan.map((item, idx) => {
+                            const t = getTask(item.taskId);
+                            if (!t) return null;
+                            return (
+                                <Link key={t.id} to={`/tasks/${t.id}`} className="flex items-start p-3 bg-slate-800 rounded-lg hover:bg-slate-700 border border-transparent hover:border-slate-600 transition group">
+                                    <div className="mr-3 mt-1 font-bold text-slate-500 text-xs">{idx + 1}</div>
+                                    <div className="flex-1">
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold text-white">{t.title}</span>
+                                            <span className="text-xs text-slate-400 flex items-center"><Clock size={10} className="mr-1"/>{t.timeEstimate || 1}h</span>
+                                        </div>
+                                        <p className="text-xs text-indigo-400 mt-1">{item.reason}</p>
+                                    </div>
+                                </Link>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const Dashboard = () => {
   const { tasks, shoppingList, activityLog, processReceiptItems } = useAppStore();
   const navigate = useNavigate();
@@ -27,7 +112,8 @@ export const Dashboard = () => {
     urgent: true,
     activity: true,
     shopping: true,
-    development: true
+    development: true,
+    planner: true
   });
   const [isScanning, setIsScanning] = useState(false);
 
@@ -80,6 +166,10 @@ export const Dashboard = () => {
            <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-lg shadow-xl p-2 hidden group-hover:block z-10">
               <p className="text-xs text-slate-500 px-2 py-1 uppercase font-bold">Visible Modules</p>
               <label className="flex items-center px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 rounded cursor-pointer">
+                 <input type="checkbox" checked={showModules.planner} onChange={() => setShowModules({...showModules, planner: !showModules.planner})} className="mr-2 accent-indigo-500" />
+                 AI Planner
+              </label>
+              <label className="flex items-center px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 rounded cursor-pointer">
                  <input type="checkbox" checked={showModules.urgent} onChange={() => setShowModules({...showModules, urgent: !showModules.urgent})} className="mr-2 accent-indigo-500" />
                  Urgent Tasks
               </label>
@@ -90,10 +180,6 @@ export const Dashboard = () => {
               <label className="flex items-center px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 rounded cursor-pointer">
                  <input type="checkbox" checked={showModules.activity} onChange={() => setShowModules({...showModules, activity: !showModules.activity})} className="mr-2 accent-indigo-500" />
                  Activity Feed
-              </label>
-              <label className="flex items-center px-2 py-1 text-sm text-slate-300 hover:bg-slate-800 rounded cursor-pointer">
-                 <input type="checkbox" checked={showModules.development} onChange={() => setShowModules({...showModules, development: !showModules.development})} className="mr-2 accent-indigo-500" />
-                 Development
               </label>
            </div>
         </div>
@@ -127,6 +213,9 @@ export const Dashboard = () => {
         
         {/* Left Column: Urgent Tasks & Actions */}
         <div className="lg:col-span-2 space-y-8">
+            
+            {showModules.planner && <DailyPlannerWidget />}
+
             {showModules.urgent && (
                 <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
                 <div className="flex justify-between items-center mb-4">
