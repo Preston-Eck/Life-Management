@@ -4,7 +4,7 @@ import { useAppStore } from '../store/AppContext';
 import { Person, Comment, DataShareField, Organization, ContactMethod, ImportantDate } from '../types';
 import { RELATIONSHIP_TYPES } from '../constants';
 import * as d3 from 'd3';
-import { Mail, Phone, Users, X, Plus, Save, MessageSquare, Trash2, Link as LinkIcon, Share2, Shield, UserCheck, User, Building, Briefcase, Calendar, MapPin, Tag } from 'lucide-react';
+import { Mail, Phone, Users, X, Plus, Save, MessageSquare, Trash2, Link as LinkIcon, Share2, Shield, UserCheck, User, Building, Briefcase, Calendar, MapPin, Tag, Send, UserPlus } from 'lucide-react';
 
 const RelationshipGraph = ({ people, organizations }: { people: Person[], organizations: Organization[] }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -176,6 +176,42 @@ const RelationshipGraph = ({ people, organizations }: { people: Person[], organi
        </div>
     </div>
   );
+};
+
+// --- Invite Modal ---
+const InviteModal = ({ onClose }: { onClose: () => void }) => {
+    const [email, setEmail] = useState('');
+    const [message, setMessage] = useState('');
+
+    const handleSend = (e: React.FormEvent) => {
+        e.preventDefault();
+        alert(`Invitation sent to ${email}`);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-96 shadow-2xl">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-white">Invite to Nexus</h3>
+                    <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-white"/></button>
+                </div>
+                <form onSubmit={handleSend} className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Address</label>
+                        <input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Personal Message</label>
+                        <textarea className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white h-24" value={message} onChange={e => setMessage(e.target.value)} placeholder="Join my family network on Nexus..." />
+                    </div>
+                    <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold flex items-center justify-center">
+                        <Send size={16} className="mr-2" /> Send Invitation
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
 };
 
 // --- Person Detail Modal ---
@@ -853,6 +889,7 @@ export const PeopleList = () => {
   const [isPersonModalOpen, setIsPersonModalOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [isOrgModalOpen, setIsOrgModalOpen] = useState(false);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   const getOrgName = (id: string) => organizations.find(o => o.id === id)?.name || 'Unknown';
   const handleOpenAddPerson = () => { setSelectedPerson(null); setIsPersonModalOpen(true); };
@@ -890,9 +927,16 @@ export const PeopleList = () => {
       
       <div className="flex justify-between items-center">
           <h3 className="text-xl font-bold text-white">{viewMode === 'People' ? 'Contacts Directory' : 'Entities Directory'}</h3>
-          <button onClick={viewMode === 'People' ? handleOpenAddPerson : handleOpenAddOrg} className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition">
-            <Plus size={20} /><span>Add {viewMode === 'People' ? 'Person' : 'Entity'}</span>
-          </button>
+          <div className="flex space-x-2">
+              {viewMode === 'People' && (
+                  <button onClick={() => setIsInviteModalOpen(true)} className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg transition border border-slate-700">
+                      <UserPlus size={20} /><span>Invite User</span>
+                  </button>
+              )}
+              <button onClick={viewMode === 'People' ? handleOpenAddPerson : handleOpenAddOrg} className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition">
+                <Plus size={20} /><span>Add {viewMode === 'People' ? 'Person' : 'Entity'}</span>
+              </button>
+          </div>
       </div>
 
       {viewMode === 'People' ? (
@@ -951,6 +995,7 @@ export const PeopleList = () => {
       )}
       {isPersonModalOpen && <PersonDetailModal person={selectedPerson} onClose={() => setIsPersonModalOpen(false)} onSave={handleSavePerson} onAddOrg={handleOpenAddOrg} />}
       {isOrgModalOpen && <OrganizationModal org={selectedOrg} onClose={() => setIsOrgModalOpen(false)} onSave={handleSaveOrg} />}
+      {isInviteModalOpen && <InviteModal onClose={() => setIsInviteModalOpen(false)} />}
     </div>
   );
 };
