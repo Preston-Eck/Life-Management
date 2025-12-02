@@ -1,0 +1,15 @@
+runtime: nodejs18
+instance_class: F1
+automatic_scaling:
+  max_instances: 10
+  min_instances: 0
+  target_cpu_utilization: 0.65
+
+env_variables:
+  NODE_ENV: 'production'
+  # Instructions:
+  # 1. Create a Google Cloud Project.
+  # 2. Enable Gemini API and get a key.
+  # 3. Replace the value below with your actual key before deploying, 
+  #    OR use Google Secret Manager for better security.
+  API_KEY: 'YOUR_REAL_GEMINI_API_KEY_HERE' 

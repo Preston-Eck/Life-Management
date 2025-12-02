@@ -1,11 +1,20 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Task, Person, Asset, ShoppingItem, Notification, ActivityLog, ShoppingStatus, Urgency, Comment, Material, Importance, TaskStatus, SharePermission, Organization, GoogleAccount, TaskSuggestion, Vendor } from '../types';
+
+
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { Task, Person, Asset, ShoppingItem, Notification, ActivityLog, ShoppingStatus, Urgency, Comment, Material, Importance, TaskStatus, SharePermission, Organization, GoogleAccount, TaskSuggestion, Vendor, AppError } from '../types';
 import { MOCK_TASKS, MOCK_PEOPLE, MOCK_ASSETS, MOCK_SHOPPING, MOCK_ORGS, MOCK_GOOGLE_ACCOUNTS, MOCK_VENDORS, SHOPPING_CATEGORIES } from '../constants';
-import { scanGoogleData } from '../services/gemini';
+import { scanGoogleData, analyzeErrorLog } from '../services/gemini';
 
 const generateIdHelper = () => Math.random().toString(36).substr(2, 9);
 
 interface AppState {
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isAdmin: boolean;
+  login: (email: string) => void;
+  logout: () => void;
+  completeOnboarding: () => void;
+
   tasks: Task[];
   people: Person[];
   assets: Asset[];
@@ -28,7 +37,7 @@ interface AppState {
   addTask: (task: Task) => void;
   updateTask: (task: Task) => void;
   deleteTask: (taskId: string) => void;
-  completeTask: (task: Task) => void; // Handles recurrence logic
+  completeTask: (task: Task) => void; 
   addSubtask: (parentId: string, title: string, description: string) => void;
   
   addAsset: (asset: Asset) => void;
@@ -65,17 +74,23 @@ interface AppState {
   updateTaskMaterials: (taskId: string, materials: Material[]) => void;
   getTaskTotalCost: (taskId: string) => number;
   
-  // Google Integrations
   linkGoogleAccount: (email: string) => void;
   unlinkGoogleAccount: (id: string) => void;
   generateTaskSuggestions: () => Promise<void>;
   acceptSuggestion: (suggestion: TaskSuggestion) => void;
   rejectSuggestion: (id: string) => void;
+
+  // Admin / Error Handling
+  appErrors: AppError[];
+  logError: (msg: string, stack?: string, componentStack?: string) => void;
+  fetchAppErrors: () => Promise<void>;
+  resolveError: (id: string) => Promise<void>;
+  analyzeError: (error: AppError) => Promise<void>;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
-// Enhanced Inverse Logic including new types
+// Helper for Reciprocal Relationships
 const getInverseRelationship = (type: string): string => {
   switch (type) {
     case 'Parent': return 'Child';
@@ -93,28 +108,180 @@ const getInverseRelationship = (type: string): string => {
     case 'Employee': return 'Employer';
     case 'Mentor': return 'Mentee';
     case 'Mentee': return 'Mentor';
-    default: return type; // For custom types, default to symmetric
+    default: return type;
   }
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
-  const [people, setPeople] = useState<Person[]>(MOCK_PEOPLE);
-  const [assets, setAssets] = useState<Asset[]>(MOCK_ASSETS);
-  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(MOCK_SHOPPING);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGS);
-  const [vendors, setVendors] = useState<Vendor[]>(MOCK_VENDORS);
-  const [shoppingCategories, setShoppingCategories] = useState<string[]>(SHOPPING_CATEGORIES);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string>('p1');
   
-  // Google Integration State
-  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>(MOCK_GOOGLE_ACCOUNTS);
+  // Admin Check
+  const isAdmin = useMemo(() => {
+     // Check authenticated user email logic. 
+     // For this mock, we check if linkedUserAccount matches 'preston@udrg.us'
+     // We need to access people state, but it is defined below. 
+     // We will compute this in the login logic or derived state below.
+     return false; 
+  }, []);
+
+  // State
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
+  const [allPeople, setAllPeople] = useState<Person[]>([]);
+  const [allAssets, setAllAssets] = useState<Asset[]>([]);
+  const [allShoppingList, setAllShoppingList] = useState<ShoppingItem[]>([]);
+  const [allNotifications, setAllNotifications] = useState<Notification[]>([]);
+  const [allActivityLog, setAllActivityLog] = useState<ActivityLog[]>([]);
+  const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
+  const [allVendors, setAllVendors] = useState<Vendor[]>([]);
+  const [allGoogleAccounts, setAllGoogleAccounts] = useState<GoogleAccount[]>([]);
+  
   const [taskSuggestions, setTaskSuggestions] = useState<TaskSuggestion[]>([]);
-
   const [customFieldDefs, setCustomFieldDefs] = useState<string[]>(['Allergies', 'Dietary Restrictions', 'Favorite Color', 'Coffee Order']);
+  const [shoppingCategories, setShoppingCategories] = useState<string[]>(SHOPPING_CATEGORIES);
 
-  const currentUser = people.find(p => p.isCurrentUser) || people[0];
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Error State
+  const [appErrors, setAppErrors] = useState<AppError[]>([]);
+
+  useEffect(() => {
+    if (isInitialized && isAuthenticated) {
+        const syncData = async () => {
+            try {
+                await fetch('/api/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tasks: allTasks,
+                        people: allPeople,
+                        assets: allAssets,
+                        shoppingList: allShoppingList,
+                        organizations: allOrganizations,
+                        vendors: allVendors,
+                        googleAccounts: allGoogleAccounts,
+                        activityLog: allActivityLog
+                    })
+                });
+            } catch (e) {
+                console.error("Failed to sync to backend", e);
+            }
+        };
+        const timer = setTimeout(syncData, 1000); // Debounce 1s
+        return () => clearTimeout(timer);
+    }
+  }, [allTasks, allPeople, allAssets, allShoppingList, allOrganizations, allVendors, allGoogleAccounts, allActivityLog, isInitialized, isAuthenticated]);
+
+
+  // Derived State
+  const currentUser = useMemo(() => {
+    return allPeople.find(p => p.id === currentUserId) || allPeople[0] || MOCK_PEOPLE[0];
+  }, [allPeople, currentUserId]);
+
+  const tasks = useMemo(() => allTasks.filter(t => t.ownerId === currentUserId || t.assigneeIds.includes(currentUserId) || t.collaboratorIds.includes(currentUserId)), [allTasks, currentUserId]);
+  const people = useMemo(() => allPeople.filter(p => p.id === currentUserId || p.isCurrentUser === false), [allPeople, currentUserId]);
+  const assets = useMemo(() => allAssets, [allAssets]); 
+  const shoppingList = useMemo(() => allShoppingList, [allShoppingList]);
+  const notifications = useMemo(() => allNotifications, [allNotifications]); 
+  const activityLog = useMemo(() => allActivityLog, [allActivityLog]);
+  const organizations = useMemo(() => allOrganizations, [allOrganizations]);
+  const vendors = useMemo(() => allVendors, [allVendors]);
+  const googleAccounts = useMemo(() => allGoogleAccounts, [allGoogleAccounts]);
+
+  const userIsAdmin = useMemo(() => {
+      return currentUser?.linkedUserAccount === 'preston@udrg.us';
+  }, [currentUser]);
+
+  const login = async (email: string) => {
+    setIsLoading(true);
+    
+    // 1. Fetch Data from Backend
+    try {
+        const response = await fetch('/api/data');
+        if (response.ok) {
+            const data = await response.json();
+            
+            // If Backend is empty (fresh server), initialize with mocks or empty
+            if (data.people && data.people.length > 0) {
+                setAllTasks(data.tasks);
+                setAllPeople(data.people);
+                setAllAssets(data.assets);
+                setAllShoppingList(data.shoppingList);
+                setAllOrganizations(data.organizations);
+                setAllVendors(data.vendors);
+                setAllGoogleAccounts(data.googleAccounts);
+                setAllActivityLog(data.activityLog);
+            } else {
+                setAllTasks(MOCK_TASKS);
+                setAllPeople(MOCK_PEOPLE);
+                setAllAssets(MOCK_ASSETS);
+                setAllShoppingList(MOCK_SHOPPING);
+                setAllOrganizations(MOCK_ORGS);
+                setAllVendors(MOCK_VENDORS);
+                setAllGoogleAccounts(MOCK_GOOGLE_ACCOUNTS);
+            }
+        }
+    } catch (e) {
+        console.error("Backend offline, loading local mocks", e);
+        setAllTasks(MOCK_TASKS);
+        setAllPeople(MOCK_PEOPLE);
+        setAllAssets(MOCK_ASSETS);
+        setAllShoppingList(MOCK_SHOPPING);
+        setAllOrganizations(MOCK_ORGS);
+        setAllVendors(MOCK_VENDORS);
+        setAllGoogleAccounts(MOCK_GOOGLE_ACCOUNTS);
+    }
+    
+    // 2. Auth Logic
+    setTimeout(() => {
+        const existingUser = allPeople.find(p => p.linkedUserAccount?.toLowerCase() === email.toLowerCase()) 
+                          || MOCK_PEOPLE.find(p => p.linkedUserAccount?.toLowerCase() === email.toLowerCase());
+
+        if (existingUser) {
+            setCurrentUserId(existingUser.id);
+        } else {
+            // Create New
+            const newUserId = generateIdHelper();
+            const newUser: Person = {
+                id: newUserId,
+                isCurrentUser: true,
+                linkedUserAccount: email,
+                hasCompletedOnboarding: false, // Force walkthrough for new user
+                firstName: email.split('@')[0],
+                lastName: '',
+                emails: [{ id: generateIdHelper(), label: 'Personal', value: email }],
+                phones: [],
+                address: '',
+                birthDate: '',
+                importantDates: [],
+                customFields: {},
+                relationships: [],
+                affiliations: [],
+                groups: ['Family'],
+                notes: [],
+                sharedWith: []
+            };
+            setAllPeople(prev => [...prev, newUser]);
+            setCurrentUserId(newUserId);
+        }
+        
+        setIsInitialized(true);
+        setIsAuthenticated(true);
+        setIsLoading(false);
+    }, 500);
+  };
+
+  const logout = () => {
+    setIsAuthenticated(false);
+    setCurrentUserId('');
+    setIsInitialized(false);
+    setAppErrors([]);
+  };
+  
+  const completeOnboarding = () => {
+      setAllPeople(prev => prev.map(p => p.id === currentUserId ? { ...p, hasCompletedOnboarding: true } : p));
+  };
 
   const logActivity = (action: string, entityName: string) => {
     const newLog: ActivityLog = {
@@ -122,17 +289,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       action,
       entityName,
       timestamp: new Date().toISOString(),
-      user: currentUser.firstName
+      user: currentUser.firstName || currentUser.linkedUserAccount || 'User'
     };
-    setActivityLog(prev => [newLog, ...prev]);
+    setAllActivityLog(prev => [newLog, ...prev]);
   };
 
+  // --- Notification Logic ---
   useEffect(() => {
-    // Notifications check
-    const newNotifs: Notification[] = [];
+    if (!isAuthenticated) return;
     
+    const newNotifs: Notification[] = [];
     tasks.forEach(t => {
-      // 1. Overdue Check
+      // Overdue Check
       if (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'Completed') {
         newNotifs.push({
           id: `overdue-${t.id}`,
@@ -144,11 +312,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           linkTo: `/tasks/${t.id}`
         });
       }
-
-      // 2. Usage Reminder Check
+      // Usage Reminder
       if (t.recurrence?.type === 'Usage' && t.recurrence.usageCheckInterval && t.assetId && t.status !== 'Completed') {
           const rule = t.recurrence;
-          // Default to task creation/update time if check date is missing to avoid immediate spam
           const lastCheck = rule.lastUsageCheckDate ? new Date(rule.lastUsageCheckDate) : new Date(); 
           const nextCheck = new Date(lastCheck);
           const interval = rule.usageCheckInterval;
@@ -174,59 +340,113 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    setNotifications(prev => {
+    setAllNotifications(prev => {
         const existingIds = new Set(prev.map(n => n.id));
         const uniqueNew = newNotifs.filter(n => !existingIds.has(n.id));
         return [...uniqueNew, ...prev];
     });
-  }, [tasks.length, assets]); // Depend on tasks and assets
+  }, [tasks.length, assets, isAuthenticated]);
+
+  // Error Handling
+  const logError = async (msg: string, stack?: string, componentStack?: string) => {
+      const errorPayload: AppError = {
+          id: generateIdHelper(),
+          message: msg,
+          stack: stack,
+          componentStack: componentStack,
+          timestamp: new Date().toISOString(),
+          userId: currentUserId,
+          userEmail: currentUser.linkedUserAccount,
+          url: window.location.href,
+          isResolved: false
+      };
+      
+      try {
+          await fetch('/api/logs/error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(errorPayload)
+          });
+          // Optimistically update if admin is logged in
+          if (userIsAdmin) {
+              setAppErrors(prev => [errorPayload, ...prev]);
+          }
+      } catch (e) {
+          console.error("Failed to log error to server", e);
+      }
+  };
+
+  const fetchAppErrors = async () => {
+      if (!userIsAdmin) return;
+      try {
+          const res = await fetch('/api/admin/errors');
+          if (res.ok) {
+              const data = await res.json();
+              setAppErrors(data);
+          }
+      } catch (e) {
+          console.error("Failed to fetch admin errors", e);
+      }
+  };
+
+  const resolveError = async (id: string) => {
+       try {
+          await fetch('/api/admin/errors/resolve', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id })
+          });
+          setAppErrors(prev => prev.map(e => e.id === id ? { ...e, isResolved: true } : e));
+      } catch (e) {
+          console.error("Failed to resolve error", e);
+      }
+  };
+
+  const analyzeError = async (error: AppError) => {
+      const analysis = await analyzeErrorLog(error);
+      setAppErrors(prev => prev.map(e => e.id === error.id ? { ...e, aiAnalysis: analysis } : e));
+  };
+
 
   const addCustomFieldDef = (fieldName: string) => {
     if (!customFieldDefs.includes(fieldName)) {
       setCustomFieldDefs([...customFieldDefs, fieldName]);
-      logActivity("Added Global Field", fieldName);
     }
   };
   
   const addShoppingCategory = (category: string) => {
     if (category && !shoppingCategories.includes(category)) {
         setShoppingCategories(prev => [...prev, category].sort());
-        logActivity("Added Shopping Category", category);
     }
   };
 
   const addTask = (task: Task) => {
-    setTasks([...tasks, task]);
+    const taskWithOwner = { ...task, ownerId: currentUserId };
+    setAllTasks(prev => [...prev, taskWithOwner]);
     logActivity("Created Task", task.title);
   };
 
   const updateTask = (updatedTask: Task) => {
-    setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t));
+    setAllTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
     logActivity("Updated Task", updatedTask.title);
   };
 
-  // Helper to get total cost (hoisted for use in completeTask)
   const calculateTaskCostRecursive = (taskId: string, currentTasks: Task[], currentShoppingList: ShoppingItem[]): number => {
       const task = currentTasks.find(t => t.id === taskId);
       if (!task) return 0;
 
-      // If task is completed and has a cached cost, use it to preserve history
       if (task.status === TaskStatus.Completed && task.costCache !== undefined) {
           return task.costCache;
       }
 
-      // 1. Calculate cost from materials (via linked shopping items)
       let materialCost = 0;
       task.materials.forEach(mat => {
           if (mat.shoppingItemId) {
               const shopItem = currentShoppingList.find(s => s.id === mat.shoppingItemId);
-              if (shopItem) {
-                  materialCost += shopItem.totalCost;
-              }
+              if (shopItem) materialCost += shopItem.totalCost;
           }
       });
 
-      // 2. Calculate cost from subtasks (Recursive)
       let subtaskCost = 0;
       task.subtaskIds.forEach(subId => {
           subtaskCost += calculateTaskCostRecursive(subId, currentTasks, currentShoppingList);
@@ -235,14 +455,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return materialCost + subtaskCost;
   };
 
-  // Exposed wrapper for components
   const getTaskTotalCost = (taskId: string): number => {
-      return calculateTaskCostRecursive(taskId, tasks, shoppingList);
+      return calculateTaskCostRecursive(taskId, allTasks, allShoppingList);
   };
 
-  // Special handler for marking done to support Recurrence and Cost Freezing
   const completeTask = (task: Task) => {
-      // Calculate final cost to freeze it
       const finalCost = getTaskTotalCost(task.id);
       
       const updated = { 
@@ -251,7 +468,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           costCache: finalCost 
       };
 
-      let newTasks = tasks.map(t => t.id === task.id ? updated : t);
+      let newTasks = allTasks.map(t => t.id === task.id ? updated : t);
 
       // Handle Recurrence
       if (task.recurrence) {
@@ -259,10 +476,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           let nextDueDate = new Date();
           let shouldRecur = false;
           
-          // Increment Count
           const currentCount = (rule.currentCount || 0) + 1;
-          
-          // Check End Conditions
           let limitReached = false;
           if (rule.endCondition === 'Count' && rule.endCount) {
              if (currentCount >= rule.endCount) limitReached = true;
@@ -279,14 +493,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 if (rule.unit === 'month') nextDueDate.setMonth(currentDue.getMonth() + interval);
                 if (rule.unit === 'year') nextDueDate.setFullYear(currentDue.getFullYear() + interval);
                 
-                // Check Date Limit
                 if (rule.endCondition === 'Date' && rule.endDate) {
                     if (nextDueDate > new Date(rule.endDate)) shouldRecur = false;
                 }
             }
             
             if (rule.type === 'Usage' && task.assetId) {
-               const asset = assets.find(a => a.id === task.assetId);
+               const asset = allAssets.find(a => a.id === task.assetId);
                if (asset && asset.currentUsage !== undefined) {
                    shouldRecur = true;
                }
@@ -301,10 +514,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                    recurrence: { 
                        ...rule, 
                        currentCount: currentCount,
-                       lastUsageReading: rule.type === 'Usage' ? assets.find(a=>a.id === task.assetId)?.currentUsage || 0 : rule.lastUsageReading 
+                       lastUsageReading: rule.type === 'Usage' ? allAssets.find(a=>a.id === task.assetId)?.currentUsage || 0 : rule.lastUsageReading 
                    },
-                   comments: [], // Clear comments for new instance
-                   costCache: undefined // Reset cost cache for new instance
+                   comments: [],
+                   costCache: undefined
                };
                newTasks.push(nextTask);
                logActivity("Recurrence Triggered", nextTask.title);
@@ -312,22 +525,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
       }
       
-      setTasks(newTasks);
+      setAllTasks(newTasks);
       logActivity("Completed Task", task.title);
   };
   
   const deleteTask = (taskId: string) => {
-    setTasks(tasks.filter(t => t.id !== taskId));
+    setAllTasks(prev => prev.filter(t => t.id !== taskId));
     logActivity("Deleted Task", "Task ID: " + taskId);
   };
 
   const addSubtask = (parentId: string, title: string, description: string) => {
-    const parent = tasks.find(t => t.id === parentId);
+    const parent = allTasks.find(t => t.id === parentId);
     if (!parent) return;
 
     const newSubtask: Task = {
       id: generateIdHelper(),
-      ownerId: currentUser.id,
+      ownerId: currentUserId,
       title,
       description,
       parentId: parent.id,
@@ -349,38 +562,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       subtaskIds: [...parent.subtaskIds, newSubtask.id]
     };
 
-    setTasks([...tasks.map(t => t.id === parentId ? updatedParent : t), newSubtask]);
+    setAllTasks(prev => [...prev.map(t => t.id === parentId ? updatedParent : t), newSubtask]);
     logActivity("Added Subtask", title);
   };
 
   const addAsset = (asset: Asset) => {
-    setAssets([...assets, asset]);
+    setAllAssets(prev => [...prev, { ...asset, ownerId: currentUserId }]); 
     logActivity("Added Asset", asset.name);
   };
 
   const updateAsset = (asset: Asset) => {
-    setAssets(assets.map(a => a.id === asset.id ? asset : a));
+    setAllAssets(prev => prev.map(a => a.id === asset.id ? asset : a));
     logActivity("Updated Asset", asset.name);
   };
 
   const updateAssetUsage = (assetId: string, usage: number) => {
-      const asset = assets.find(a => a.id === assetId);
+      const asset = allAssets.find(a => a.id === assetId);
       if (!asset) return;
       
       const newAsset = { ...asset, currentUsage: usage };
-      setAssets(assets.map(a => a.id === assetId ? newAsset : a));
+      setAllAssets(prev => prev.map(a => a.id === assetId ? newAsset : a));
       logActivity("Updated Usage", `${asset.name}: ${usage} ${asset.usageUnit}`);
 
-      // Process Usage-Based Recurrence Logic
-      const updatedTasks = tasks.map(t => {
-          // Update last check date if this task cares about this asset
+      // Process Usage-Based Recurrence
+      const updatedTasks = allTasks.map(t => {
           if (t.assetId === assetId && t.recurrence?.type === 'Usage') {
                const newRecurrence = {
                    ...t.recurrence,
                    lastUsageCheckDate: new Date().toISOString()
                };
                
-               // Check if threshold met to trigger urgency
                const rule = t.recurrence;
                const lastReading = rule.lastUsageReading || 0;
                const threshold = rule.usageThreshold || 0;
@@ -404,7 +615,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                }
                
                if (notificationToAdd) {
-                   setNotifications(prev => [...prev, notificationToAdd!]);
+                   setAllNotifications(prev => [...prev, notificationToAdd!]);
                }
 
                return { ...t, urgency: urgencyUpdate, recurrence: newRecurrence };
@@ -412,29 +623,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return t;
       });
 
-      // Only update state if tasks actually changed
-      if (JSON.stringify(updatedTasks) !== JSON.stringify(tasks)) {
-          setTasks(updatedTasks);
-      }
+      setAllTasks(updatedTasks);
   };
 
   const deleteAsset = (id: string) => {
-    setAssets(assets.filter(a => a.id !== id));
+    setAllAssets(prev => prev.filter(a => a.id !== id));
     logActivity("Deleted Asset", id);
   };
   
-  const addShoppingItem = (item: ShoppingItem) => setShoppingList([...shoppingList, item]);
+  const addShoppingItem = (item: ShoppingItem) => setAllShoppingList(prev => [...prev, item]);
   
   const updateShoppingItem = (item: ShoppingItem) => {
-    setShoppingList(shoppingList.map(i => i.id === item.id ? item : i));
+    setAllShoppingList(prev => prev.map(i => i.id === item.id ? item : i));
   };
 
   const deleteShoppingItem = (id: string) => {
-    setShoppingList(shoppingList.filter(i => i.id !== id));
+    setAllShoppingList(prev => prev.filter(i => i.id !== id));
   }
 
   const processReceiptItems = (scannedItems: any[]) => {
-    let updatedList = [...shoppingList];
+    let updatedList = [...allShoppingList];
     const newItems: ShoppingItem[] = [];
 
     scannedItems.forEach(scanned => {
@@ -466,26 +674,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    setShoppingList([...updatedList, ...newItems]);
+    setAllShoppingList([...updatedList, ...newItems]);
   };
 
   const addVendor = (vendor: Vendor) => {
-    setVendors([...vendors, vendor]);
+    setAllVendors(prev => [...prev, vendor]);
     logActivity("Added Vendor", vendor.name);
   };
 
   const updateVendor = (vendor: Vendor) => {
-    setVendors(vendors.map(v => v.id === vendor.id ? vendor : v));
+    setAllVendors(prev => prev.map(v => v.id === vendor.id ? vendor : v));
     logActivity("Updated Vendor", vendor.name);
   };
 
   const deleteVendor = (id: string) => {
-    setVendors(vendors.filter(v => v.id !== id));
+    setAllVendors(prev => prev.filter(v => v.id !== id));
     logActivity("Deleted Vendor", id);
   };
 
   const addPerson = (person: Person) => {
-    setPeople(prev => {
+    setAllPeople(prev => {
         const updatedPeople = [...prev, person];
         person.relationships.forEach(rel => {
             const targetIndex = updatedPeople.findIndex(p => p.id === rel.personId);
@@ -506,7 +714,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updatePerson = (updatedPerson: Person) => {
-    setPeople(prevPeople => {
+    setAllPeople(prevPeople => {
         const oldPerson = prevPeople.find(p => p.id === updatedPerson.id);
         let newPeople = prevPeople.map(p => p.id === updatedPerson.id ? updatedPerson : p);
         
@@ -545,234 +753,258 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 }
             }
         });
-
         return newPeople;
     });
     logActivity("Updated Person", `${updatedPerson.firstName} ${updatedPerson.lastName}`);
   };
 
   const sharePerson = (personId: string, shareData: SharePermission) => {
-    setPeople(prev => prev.map(p => {
-        if(p.id !== personId) return p;
-        const existingShareIndex = p.sharedWith.findIndex(s => s.userId === shareData.userId);
-        let newShares = [...p.sharedWith];
-        
-        if (existingShareIndex >= 0) {
-            newShares[existingShareIndex] = shareData;
+     setAllPeople(prev => prev.map(p => {
+        if (p.id !== personId) return p;
+        const existingIndex = p.sharedWith.findIndex(s => s.userId === shareData.userId);
+        let newSharedWith = [...p.sharedWith];
+        if (existingIndex >= 0) {
+            newSharedWith[existingIndex] = shareData;
         } else {
-            newShares.push(shareData);
+            newSharedWith.push(shareData);
         }
-        return { ...p, sharedWith: newShares };
-    }));
-    logActivity("Shared Person Profile", "Shared profile with " + shareData.userId);
+        return { ...p, sharedWith: newSharedWith };
+     }));
   };
-
+  
   const addOrganization = (org: Organization) => {
-    setOrganizations([...organizations, org]);
+    setAllOrganizations(prev => [...prev, org]);
     logActivity("Added Organization", org.name);
   };
-
+  
   const updateOrganization = (org: Organization) => {
-    setOrganizations(organizations.map(o => o.id === org.id ? org : o));
+    setAllOrganizations(prev => prev.map(o => o.id === org.id ? org : o));
     logActivity("Updated Organization", org.name);
   };
-
+  
   const deleteOrganization = (id: string) => {
-    setOrganizations(organizations.filter(o => o.id !== id));
+    setAllOrganizations(prev => prev.filter(o => o.id !== id));
     logActivity("Deleted Organization", id);
   };
-
+  
   const markNotificationRead = (id: string) => {
-    setNotifications(notifications.map(n => n.id === id ? { ...n, isRead: true } : n));
+      setAllNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
   };
-
+  
   const snoozeNotification = (id: string, until: Date) => {
-    setNotifications(notifications.map(n => n.id === id ? { ...n, snoozedUntil: until.toISOString() } : n));
+      setAllNotifications(prev => prev.map(n => n.id === id ? { ...n, snoozedUntil: until.toISOString() } : n));
   };
-
+  
   const pinNotification = (id: string) => {
-    setNotifications(notifications.map(n => n.id === id ? { ...n, isPinned: !n.isPinned } : n));
+      setAllNotifications(prev => prev.map(n => n.id === id ? { ...n, isPinned: !n.isPinned } : n));
   };
-
+  
   const clearNotifications = () => {
-    setNotifications([]);
+      setAllNotifications(prev => prev.filter(n => n.isPinned));
   };
-
+  
   const addComment = (taskId: string, text: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    
-    const newComment: Comment = {
-      id: generateIdHelper(),
-      authorId: currentUser.id,
-      text,
-      timestamp: new Date().toISOString(),
-      isRead: false,
-      isPinned: false
-    };
-
-    const mentionRegex = /@(\w+)/g;
-    let match;
-    while ((match = mentionRegex.exec(text)) !== null) {
-        const name = match[1].toLowerCase();
-        const mentionedPerson = people.find(p => p.firstName.toLowerCase() === name);
-        if (mentionedPerson) {
-             const mentionNotif: Notification = {
-                 id: generateIdHelper(),
-                 type: 'Mention',
-                 title: 'You were mentioned',
-                 message: `${currentUser.firstName} mentioned you in "${task.title}"`,
-                 timestamp: new Date().toISOString(),
-                 isRead: false,
-                 linkTo: `/tasks/${task.id}`,
-                 actionRequired: true
-             };
-             setNotifications(prev => [mentionNotif, ...prev]);
-        }
-    }
-
-    const updatedTask = {
-      ...task,
-      comments: [...task.comments, newComment]
-    };
-    updateTask(updatedTask);
-    logActivity("Commented on", task.title);
-  };
-
-  const editComment = (taskId: string, commentId: string, newText: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const updatedComments = task.comments.map(c => c.id === commentId ? { ...c, text: newText } : c);
-    updateTask({ ...task, comments: updatedComments });
-  };
-
-  const deleteComment = (taskId: string, commentId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const updatedComments = task.comments.filter(c => c.id !== commentId);
-    updateTask({ ...task, comments: updatedComments });
-  };
-
-  // Enhanced Update Task Materials to Sync with Shopping List
-  const updateTaskMaterials = (taskId: string, materials: Material[]) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    let updatedShoppingList = [...shoppingList];
-    const updatedMaterials = [...materials];
-
-    updatedMaterials.forEach((mat, index) => {
-        // If material doesn't have a linked shopping item, create one
-        if (!mat.shoppingItemId) {
-            const newShoppingItem: ShoppingItem = {
-                id: generateIdHelper(),
-                name: mat.name,
-                quantity: mat.quantity,
-                unitPrice: 0, // Needs manual or AI input
-                totalCost: 0,
-                status: mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need,
-                statusUpdatedDate: new Date().toISOString(),
-                taskId: taskId
-            };
-            updatedShoppingList.push(newShoppingItem);
-            updatedMaterials[index] = { ...mat, shoppingItemId: newShoppingItem.id };
-        } else {
-            // Sync status if linked
-            const shopItemIndex = updatedShoppingList.findIndex(s => s.id === mat.shoppingItemId);
-            if (shopItemIndex >= 0) {
-                const currentStatus = updatedShoppingList[shopItemIndex].status;
-                const newStatus = mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need;
-                
-                // Only update if conflicting states (e.g. material says onHand but shopping says Need)
-                if (mat.isOnHand && currentStatus !== ShoppingStatus.Acquired) {
-                    updatedShoppingList[shopItemIndex] = {
-                        ...updatedShoppingList[shopItemIndex],
-                        status: ShoppingStatus.Acquired,
-                        statusUpdatedDate: new Date().toISOString()
-                    };
-                } else if (!mat.isOnHand && currentStatus === ShoppingStatus.Acquired) {
-                     updatedShoppingList[shopItemIndex] = {
-                        ...updatedShoppingList[shopItemIndex],
-                        status: ShoppingStatus.Need,
-                        statusUpdatedDate: new Date().toISOString()
-                    };
-                }
-            }
-        }
-    });
-
-    setShoppingList(updatedShoppingList);
-    updateTask({ ...task, materials: updatedMaterials });
-  };
-
-  // --- Google Account Logic ---
-  const linkGoogleAccount = (email: string) => {
-      const newAcc: GoogleAccount = {
+      const task = allTasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      const newComment: Comment = {
           id: generateIdHelper(),
-          email,
-          services: ['Gmail', 'Calendar', 'Drive'],
-          lastSync: new Date().toISOString()
+          authorId: currentUserId,
+          text,
+          timestamp: new Date().toISOString(),
+          isRead: true,
+          isPinned: false
       };
-      setGoogleAccounts([...googleAccounts, newAcc]);
-      logActivity('Linked Account', email);
+      
+      // Check for mentions
+      const mentions = text.match(/@(\w+)/g);
+      if (mentions) {
+          mentions.forEach(m => {
+              const name = m.substring(1).toLowerCase();
+              const person = allPeople.find(p => p.firstName.toLowerCase() === name);
+              if (person) {
+                  setAllNotifications(prev => [...prev, {
+                      id: generateIdHelper(),
+                      type: 'Mention',
+                      title: 'You were mentioned',
+                      message: `${currentUser.firstName} mentioned you in task: ${task.title}`,
+                      timestamp: new Date().toISOString(),
+                      isRead: false,
+                      linkTo: `/tasks/${taskId}`
+                  }]);
+              }
+          });
+      }
+      
+      const updatedTask = { ...task, comments: [newComment, ...task.comments] };
+      setAllTasks(prev => prev.map(t => t.id === taskId ? updatedTask : t));
   };
+  
+  const editComment = (taskId: string, commentId: string, newText: string) => {
+      const task = allTasks.find(t => t.id === taskId);
+      if (!task) return;
+      const updatedComments = task.comments.map(c => c.id === commentId ? { ...c, text: newText } : c);
+      setAllTasks(prev => prev.map(t => t.id === taskId ? { ...task, comments: updatedComments } : t));
+  };
+  
+  const deleteComment = (taskId: string, commentId: string) => {
+      const task = allTasks.find(t => t.id === taskId);
+      if (!task) return;
+      setAllTasks(prev => prev.map(t => t.id === taskId ? { ...task, comments: task.comments.filter(c => c.id !== commentId) } : t));
+  };
+  
+  const updateTaskMaterials = (taskId: string, materials: Material[]) => {
+      // Sync materials with shopping list
+      let updatedShoppingList = [...allShoppingList];
+      const newShoppingItems: ShoppingItem[] = [];
 
+      const syncedMaterials = materials.map(mat => {
+          if (!mat.shoppingItemId) {
+              // Create new Shopping Item
+              const newItem: ShoppingItem = {
+                  id: generateIdHelper(),
+                  name: mat.name,
+                  quantity: mat.quantity,
+                  unitPrice: 0, 
+                  totalCost: 0,
+                  status: mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need,
+                  statusUpdatedDate: new Date().toISOString(),
+                  taskId: taskId
+              };
+              newShoppingItems.push(newItem);
+              return { ...mat, shoppingItemId: newItem.id };
+          } else {
+              // Update existing
+              const existingIdx = updatedShoppingList.findIndex(s => s.id === mat.shoppingItemId);
+              if (existingIdx >= 0) {
+                  updatedShoppingList[existingIdx] = {
+                      ...updatedShoppingList[existingIdx],
+                      status: mat.isOnHand ? ShoppingStatus.Acquired : ShoppingStatus.Need,
+                      statusUpdatedDate: new Date().toISOString()
+                  };
+              }
+              return mat;
+          }
+      });
+      
+      setAllShoppingList([...updatedShoppingList, ...newShoppingItems]);
+      setAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, materials: syncedMaterials } : t));
+  };
+  
+  const linkGoogleAccount = (email: string) => {
+      if (!allGoogleAccounts.find(g => g.email === email)) {
+          setAllGoogleAccounts(prev => [...prev, {
+              id: generateIdHelper(),
+              email,
+              services: ['Gmail', 'Calendar', 'Drive'],
+              lastSync: new Date().toISOString()
+          }]);
+      }
+  };
+  
   const unlinkGoogleAccount = (id: string) => {
-      setGoogleAccounts(googleAccounts.filter(a => a.id !== id));
+      setAllGoogleAccounts(prev => prev.filter(g => g.id !== id));
   };
-
+  
   const generateTaskSuggestions = async () => {
-      const accounts = googleAccounts.map(a => a.email);
+      const accounts = allGoogleAccounts.map(g => g.email);
+      if (accounts.length === 0) return;
       const suggestions = await scanGoogleData(accounts);
-      
-      // Filter out duplicates that match existing tasks by title
-      const uniqueSuggestions = suggestions.filter(s => 
-          !tasks.some(t => t.title.toLowerCase() === s.title.toLowerCase())
-      );
-      
-      setTaskSuggestions(uniqueSuggestions);
+      setTaskSuggestions(suggestions);
   };
-
+  
   const acceptSuggestion = (suggestion: TaskSuggestion) => {
       const newTask: Task = {
           id: generateIdHelper(),
-          ownerId: currentUser.id,
+          ownerId: currentUserId,
           title: suggestion.title,
           description: suggestion.description,
-          status: TaskStatus.Pending,
+          dueDate: suggestion.dueDate,
           urgency: Urgency.Medium,
           importance: Importance.High,
+          status: TaskStatus.Pending,
+          assigneeIds: [currentUserId],
+          collaboratorIds: [],
+          context: 'Personal',
           subtaskIds: [],
           prerequisiteIds: [],
-          assigneeIds: [currentUser.id],
-          collaboratorIds: [],
-          comments: [],
           materials: [],
-          context: 'Personal',
-          dueDate: suggestion.dueDate,
+          comments: [],
           attachments: []
       };
       addTask(newTask);
       setTaskSuggestions(prev => prev.filter(s => s.id !== suggestion.id));
-      logActivity('Accepted Suggestion', suggestion.title);
   };
-
+  
   const rejectSuggestion = (id: string) => {
       setTaskSuggestions(prev => prev.filter(s => s.id !== id));
   };
 
   return (
-    <AppContext.Provider value={{ 
-      tasks, people, assets, shoppingList, currentUser, notifications, activityLog, organizations, vendors, customFieldDefs,
-      googleAccounts, taskSuggestions, shoppingCategories,
-      addShoppingCategory, addCustomFieldDef,
-      addTask, updateTask, deleteTask, completeTask, addSubtask, addAsset, updateAsset, deleteAsset, updateAssetUsage,
-      addShoppingItem, updateShoppingItem, deleteShoppingItem, processReceiptItems,
-      addVendor, updateVendor, deleteVendor,
-      addPerson, updatePerson, sharePerson, addOrganization, updateOrganization, deleteOrganization,
-      markNotificationRead, snoozeNotification, pinNotification, clearNotifications, 
-      addComment, editComment, deleteComment, updateTaskMaterials, getTaskTotalCost,
-      linkGoogleAccount, unlinkGoogleAccount, generateTaskSuggestions, acceptSuggestion, rejectSuggestion
+    <AppContext.Provider value={{
+      isAuthenticated,
+      isLoading,
+      isAdmin: userIsAdmin,
+      login,
+      logout,
+      completeOnboarding,
+      tasks,
+      people,
+      assets,
+      shoppingList,
+      currentUser,
+      notifications,
+      activityLog,
+      organizations,
+      vendors,
+      googleAccounts,
+      taskSuggestions,
+      customFieldDefs,
+      addCustomFieldDef,
+      shoppingCategories,
+      addShoppingCategory,
+      addTask,
+      updateTask,
+      deleteTask,
+      completeTask,
+      addSubtask,
+      addAsset,
+      updateAsset,
+      deleteAsset,
+      updateAssetUsage,
+      addShoppingItem,
+      updateShoppingItem,
+      deleteShoppingItem,
+      processReceiptItems,
+      addVendor,
+      updateVendor,
+      deleteVendor,
+      addPerson,
+      updatePerson,
+      sharePerson,
+      addOrganization,
+      updateOrganization,
+      deleteOrganization,
+      markNotificationRead,
+      snoozeNotification,
+      pinNotification,
+      clearNotifications,
+      addComment,
+      editComment,
+      deleteComment,
+      updateTaskMaterials,
+      getTaskTotalCost,
+      linkGoogleAccount,
+      unlinkGoogleAccount,
+      generateTaskSuggestions,
+      acceptSuggestion,
+      rejectSuggestion,
+      
+      appErrors,
+      logError,
+      fetchAppErrors,
+      resolveError,
+      analyzeError
     }}>
       {children}
     </AppContext.Provider>
@@ -781,6 +1013,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useAppStore = () => {
   const context = useContext(AppContext);
-  if (!context) throw new Error("useAppStore must be used within AppProvider");
+  if (context === undefined) {
+    throw new Error('useAppStore must be used within an AppProvider');
+  }
   return context;
 };

@@ -38,6 +38,19 @@ export enum ShoppingStatus {
 
 export type ShoppingCategory = string;
 
+export interface AppError {
+  id: string;
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  timestamp: string;
+  userId?: string;
+  userEmail?: string;
+  url?: string;
+  aiAnalysis?: string; // Markdown response from Gemini
+  isResolved: boolean;
+}
+
 export interface GoogleAccount {
   id: string;
   email: string;
@@ -253,6 +266,7 @@ export interface Person {
   id: string;
   isCurrentUser?: boolean; // Flag for "My Profile"
   linkedUserAccount?: string; // Username/Email of the associated App Account
+  hasCompletedOnboarding?: boolean; // New flag for setup wizard
   firstName: string;
   lastName: string;
   avatarUrl?: string;

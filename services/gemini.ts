@@ -1,6 +1,7 @@
 
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { Task, Urgency, Importance, ReceiptParsedItem, TaskSuggestion } from "../types";
+import { Task, Urgency, Importance, ReceiptParsedItem, TaskSuggestion, AppError } from "../types";
 
 const apiKey = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
@@ -232,6 +233,37 @@ export const analyzeTaskAttributes = async (title: string, description: string):
     console.error("Gemini Attribute Analysis Error", error);
     return { urgency: Urgency.Medium, importance: Importance.High, context: 'Personal', timeEstimate: 1 };
   }
+};
+
+export const analyzeErrorLog = async (error: AppError): Promise<string> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `You are a Senior Site Reliability Engineer and React Expert.
+            Analyze the following application error and provide a technical diagnosis and a concrete code fix.
+            
+            Error Message: ${error.message}
+            Stack Trace: ${error.stack}
+            Component Stack: ${error.componentStack}
+            User Context: ${error.userEmail}
+            URL: ${error.url}
+            
+            Format your response in Markdown:
+            ### Diagnosis
+            [Explain the root cause]
+
+            ### Impact
+            [Explain impact on user]
+
+            ### Suggested Fix
+            [Provide code snippet or instruction to fix it]
+            `
+        });
+        return response.text || "Could not analyze error.";
+    } catch (e) {
+        console.error("Gemini Error Analysis Failed", e);
+        return "Failed to contact AI service for analysis.";
+    }
 };
 
 // --- Mock Integration for Google Account Scanning ---

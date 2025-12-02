@@ -4,7 +4,7 @@ import { useAppStore } from '../store/AppContext';
 import { Person, Comment, DataShareField, Organization, ContactMethod, ImportantDate } from '../types';
 import { RELATIONSHIP_TYPES } from '../constants';
 import * as d3 from 'd3';
-import { Mail, Phone, Users, X, Plus, Save, MessageSquare, Trash2, Link as LinkIcon, Share2, Shield, UserCheck, User, Building, Briefcase, Calendar, MapPin, Tag, Send, UserPlus } from 'lucide-react';
+import { Mail, Phone, Users, X, Plus, Save, MessageSquare, Trash2, Link as LinkIcon, Share2, Shield, UserCheck, User, Building, Briefcase, Calendar, MapPin, Tag, Send, UserPlus, Copy, Check } from 'lucide-react';
 
 const RelationshipGraph = ({ people, organizations }: { people: Person[], organizations: Organization[] }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -182,11 +182,21 @@ const RelationshipGraph = ({ people, organizations }: { people: Person[], organi
 const InviteModal = ({ onClose }: { onClose: () => void }) => {
     const [email, setEmail] = useState('');
     const [message, setMessage] = useState('');
+    const [status, setStatus] = useState<'Idle' | 'Sending' | 'Sent'>('Idle');
+    const [copied, setCopied] = useState(false);
 
     const handleSend = (e: React.FormEvent) => {
         e.preventDefault();
-        alert(`Invitation sent to ${email}`);
-        onClose();
+        setStatus('Sending');
+        setTimeout(() => {
+            setStatus('Sent');
+        }, 1500);
+    };
+
+    const copyLink = () => {
+        navigator.clipboard.writeText(`https://nexus-lifeos.app/join?ref=${btoa(email)}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
     };
 
     return (
@@ -196,19 +206,48 @@ const InviteModal = ({ onClose }: { onClose: () => void }) => {
                     <h3 className="font-bold text-white">Invite to Nexus</h3>
                     <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-white"/></button>
                 </div>
-                <form onSubmit={handleSend} className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Address</label>
-                        <input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+                
+                {status === 'Sent' ? (
+                    <div className="text-center py-4 space-y-4">
+                        <div className="w-12 h-12 bg-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mx-auto">
+                            <Check size={24} />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-white">Invitation Simulated!</h4>
+                            <p className="text-xs text-slate-400 mt-2">
+                                Since this is a demo environment, no actual email was sent. 
+                                <br/>Please copy the link below manually.
+                            </p>
+                        </div>
+                        <div className="bg-slate-800 p-2 rounded flex items-center justify-between border border-slate-700">
+                            <code className="text-xs text-indigo-400 truncate flex-1 mr-2">nexus-lifeos.app/join?ref=...</code>
+                            <button onClick={copyLink} className="text-slate-400 hover:text-white">
+                                {copied ? <Check size={16} className="text-emerald-500"/> : <Copy size={16}/>}
+                            </button>
+                        </div>
+                        <button onClick={onClose} className="text-sm text-slate-500 hover:text-white">Close</button>
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Personal Message</label>
-                        <textarea className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white h-24" value={message} onChange={e => setMessage(e.target.value)} placeholder="Join my family network on Nexus..." />
-                    </div>
-                    <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold flex items-center justify-center">
-                        <Send size={16} className="mr-2" /> Send Invitation
-                    </button>
-                </form>
+                ) : (
+                    <form onSubmit={handleSend} className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Address</label>
+                            <input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white" value={email} onChange={e => setEmail(e.target.value)} autoFocus />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Personal Message</label>
+                            <textarea className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white h-24" value={message} onChange={e => setMessage(e.target.value)} placeholder="Join my family network on Nexus..." />
+                        </div>
+                        <button type="submit" disabled={status === 'Sending'} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-bold flex items-center justify-center disabled:opacity-50">
+                            {status === 'Sending' ? (
+                                <div className="animate-spin w-4 h-4 border-2 border-white rounded-full border-t-transparent"></div>
+                            ) : (
+                                <>
+                                    <Send size={16} className="mr-2" /> Send Invitation
+                                </>
+                            )}
+                        </button>
+                    </form>
+                )}
             </div>
         </div>
     );
@@ -613,7 +652,7 @@ const PersonDetailModal = ({
                                             <span className="text-slate-200 font-medium">{d.label}</span>
                                             {d.repeats && <span className="text-[10px] bg-indigo-900 text-indigo-300 px-1 rounded uppercase">Repeats</span>}
                                         </div>
-                                        <div className="text-xs text-slate-500">{new Date(d.date).toLocaleDateString()}</p>
+                                        <div className="text-xs text-slate-500">{new Date(d.date).toLocaleDateString()}</div>
                                     </div>
                                     <button onClick={() => removeImportantDate(d.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={14}/></button>
                                 </div>

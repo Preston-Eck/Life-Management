@@ -1,4 +1,5 @@
 
+
 import { Person, Task, Asset, ShoppingItem, Urgency, Importance, TaskStatus, AssetType, ShoppingStatus, Organization, GoogleAccount, Vendor, ShoppingCategory } from './types';
 
 // Standard Relationships for Dropdowns
@@ -59,6 +60,7 @@ export const MOCK_PEOPLE: Person[] = [
     id: 'p1',
     isCurrentUser: true,
     linkedUserAccount: 'alex.mercer@nexus.app',
+    hasCompletedOnboarding: true,
     firstName: 'Alex',
     lastName: 'Mercer',
     emails: [{ id: 'e1', label: 'Personal', value: 'alex@example.com' }],

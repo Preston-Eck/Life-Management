@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink, Cloud, MessageSquare } from 'lucide-react';
+import { Home, CheckSquare, Users, ShoppingCart, Truck, BookOpen, Menu, Bell, X, Check, Clock, Pin, ExternalLink, Cloud, MessageSquare, ShieldAlert, Settings, LogOut } from 'lucide-react';
 import { useAppStore } from '../store/AppContext';
 import { GoogleIntegrationModal } from './GoogleIntegration';
+import { UserSettingsModal } from './UserSettings';
 
 const NavItem = ({ to, icon: Icon, label, active, badge }: any) => (
   <Link
@@ -28,8 +29,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'All' | 'Mentions'>('All');
-  const { notifications, markNotificationRead, clearNotifications, snoozeNotification, pinNotification, tasks } = useAppStore();
+  const { notifications, markNotificationRead, clearNotifications, snoozeNotification, pinNotification, tasks, currentUser, logout, isAdmin } = useAppStore();
 
   const visibleNotifications = notifications
     .filter(n => !n.snoozedUntil || new Date(n.snoozedUntil) < new Date())
@@ -70,15 +72,34 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <NavItem to="/assets" icon={Truck} label="Assets" active={location.pathname.startsWith('/assets')} />
             <NavItem to="/shopping" icon={ShoppingCart} label="Shopping" active={location.pathname.startsWith('/shopping')} />
             <NavItem to="/library" icon={BookOpen} label="Library (WIP)" active={location.pathname.startsWith('/library')} />
+            {isAdmin && (
+                <div className="pt-4 mt-4 border-t border-slate-800">
+                    <p className="px-4 text-xs font-bold text-slate-500 uppercase mb-2">System</p>
+                    <NavItem to="/admin" icon={ShieldAlert} label="Admin Console" active={location.pathname.startsWith('/admin')} />
+                </div>
+            )}
           </nav>
+          
           <div className="p-4 border-t border-slate-800">
-             <div className="flex items-center space-x-3">
-               <img src="https://picsum.photos/40" alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" />
-               <div>
-                 <p className="text-sm font-semibold">Alex Mercer</p>
-                 <p className="text-xs text-slate-400">Head of Household</p>
+             <button 
+                onClick={() => setShowSettingsModal(true)}
+                className="w-full flex items-center space-x-3 mb-3 p-2 rounded-lg hover:bg-slate-800 transition-colors text-left group"
+             >
+               <img src={currentUser.avatarUrl || "https://via.placeholder.com/40"} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500 group-hover:border-white transition-colors" />
+               <div className="min-w-0 flex-1">
+                 <p className="text-sm font-semibold truncate text-white">{currentUser.firstName} {currentUser.lastName}</p>
+                 <div className="flex items-center text-xs text-slate-400 group-hover:text-indigo-400">
+                     <Settings size={10} className="mr-1" />
+                     <span>Settings</span>
+                 </div>
                </div>
-             </div>
+             </button>
+             
+             {/* Small signout for quick access */}
+             <button onClick={logout} className="w-full flex items-center justify-center space-x-2 text-xs text-slate-500 hover:text-red-400 py-1 hover:bg-slate-800/50 rounded transition-colors">
+                <LogOut size={12} />
+                <span>Sign Out</span>
+             </button>
           </div>
         </div>
       </aside>
@@ -194,6 +215,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </main>
 
       {showGoogleModal && <GoogleIntegrationModal onClose={() => setShowGoogleModal(false)} />}
+      {showSettingsModal && <UserSettingsModal onClose={() => setShowSettingsModal(false)} />}
     </div>
   );
 };
